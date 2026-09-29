@@ -7,13 +7,46 @@
 ## Εκτέλεση
 
 ```sh
-npm run test:stress                 # mock provider — καμία δικτυακή κλήση, ~1 λεπτό
-npm run test:stress:live            # πραγματικό Gemini (χρειάζεται GEMINI_API_KEY) — βλ. παρακάτω
-STRICT=1 npm run test:stress        # exit code 1 αν αποτύχει κάποιο test (για CI)
+npm run test:stress                 # MOCK — ψεύτικος provider, καμία δικτυακή κλήση, ~1 λεπτό
+npm run test:stress:live:dry        # LIVE harness με προσομοιωμένη ανάγνωση — 0 πραγματικές κλήσεις
+npm run test:stress:live            # LIVE — πραγματικό Gemini (χρειάζεται GEMINI_API_KEY)
+STRICT=1 npm run test:stress        # exit code 1 αν αποτύχει κάποιο mock test (για CI)
 ```
 
-Αποτελέσματα: `tests/stress/LAST_REPORT.md` (τελευταίο mock run) και `tests/stress/reports/<χρόνος>/`
-(`report.md`, `results.jsonl` με μία γραμμή ανά test, `summary.json`). Τα keys δεν γράφονται ποτέ στα logs.
+### Το key για το live (μόνο environment variable — ποτέ σε αρχείο)
+
+Η εφαρμογή στον browser **δεν** διαβάζει environment variables (το key μπαίνει στην οθόνη και μένει στο
+`localStorage` του κινητού). Μόνο το live test διαβάζει **`GEMINI_API_KEY`** (`tests/stress/run-live.mjs`).
+
+macOS / Linux (μόνο για το τρέχον terminal):
+```sh
+export GEMINI_API_KEY="MY_API_KEY"
+npm run test:stress:live
+unset GEMINI_API_KEY
+```
+Για να μη μείνει το key στο ιστορικό του shell: `read -rs GEMINI_API_KEY && export GEMINI_API_KEY` (επικόλληση + Enter).
+
+Windows PowerShell (μόνο για το τρέχον παράθυρο):
+```powershell
+$env:GEMINI_API_KEY="MY_API_KEY"
+npm run test:stress:live
+Remove-Item Env:GEMINI_API_KEY
+```
+Για να μη μείνει στο ιστορικό (PowerShell 7+): `$env:GEMINI_API_KEY = Read-Host -MaskInput`.
+
+Σε cloud session του Claude Code: πρόσθεσε το `GEMINI_API_KEY` ως environment variable στις ρυθμίσεις του
+environment· το βλέπει νέο session.
+
+### Όρια ασφαλείας του live
+
+Concurrency 1 · έως **10** πραγματικές κλήσεις συνολικά (`LIVE_MAX_CALLS`, πάνω από 10 μόνο με
+`LIVE_ALLOW_MORE=1`) · έως **2** ανά test (`LIVE_MAX_CALLS_PER_TEST`) · οι κλήσεις πέρα από τα όρια μπλοκάρονται
+τοπικά και δεν φεύγουν · **διακοπή** με την πρώτη μη αναμενόμενη κατανάλωση (retry, οποιοδήποτε μη-200,
+timeout). Το key γίνεται redact σε κάθε έξοδο και στο τέλος ελέγχονται όλα τα αρχεία εξόδου για κομμάτι του.
+
+Τα 8 live σενάρια (`cases/live.cases.mjs`): καθαρή φωτογραφία (+2 επαναλήψεις αν μένουν κλήσεις), πολλά υλικά,
+διόρθωση, άρνηση, τιμή, άγνωστη ποσότητα, prompt injection, κομμένη/θολή. Report: `LAST_REPORT_LIVE.md`
+(dry: `LAST_REPORT_LIVE_DRY.md`) — MOCK και LIVE σε ξεχωριστές ενότητες, με σύγκριση.
 
 ## Τι ελέγχεται
 
@@ -36,9 +69,7 @@ STRICT=1 npm run test:stress        # exit code 1 αν αποτύχει κάπο
 | `TEST_DURATION` | 0 (χωρίς όριο) | 120000 | μετά από τόσα ms δεν ξεκινούν νέα αιτήματα |
 | `MOCK_RPM` / `MOCK_LATENCY_MS` / `MOCK_ERROR_RATE` / `MOCK_OVERLOAD_ERROR_RATE` | 10 / 1800 / 0.02 / 0.6 | — | συμπεριφορά του ψεύτικου provider (υποθέσεις — άλλαξέ τες για τα δικά σου όρια) |
 | `SCALE` | 0.01 | — | επιτάχυνση χρόνου στο mock (οι χρόνοι αναφέρονται σε «πραγματικά» ms, ±5%) |
-| `LIVE_MAX_CALLS` | — | 40 | σκληρό όριο HTTP κλήσεων προς τον provider για όλο το run |
-| `LIVE_REPEAT` | — | 1 | επαναλήψεις κάθε φωτογραφίας (σταθερότητα) |
-| `LIVE_LOAD=1` | — | off | ενεργοποιεί και live load test (μετά το quality) |
+| `LIVE_MAX_CALLS` | — | 10 | σκληρό όριο HTTP κλήσεων προς τον provider για όλο το run |
 | `PRICE_IN_PER_M` / `PRICE_OUT_PER_M` | — | — | τιμή ανά 1M tokens για εκτίμηση κόστους (αλλιώς δεν υπολογίζεται) |
 
 Παράδειγμα live:

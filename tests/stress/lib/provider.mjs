@@ -6,7 +6,8 @@ const realFetch = globalThis.fetch;
 
 /** Κάθε αίτημα της εφαρμογής φέρει μοναδικό «base64» (π.χ. req-17) ώστε να ξέρουμε σε ποιο request ανήκει. */
 function requestTag(init){
-  try { return JSON.parse(init.body).contents[0].parts[0].inline_data.data.slice(0, 40); } catch { return '?'; }
+  // Μήκος + τέλος: οι JPEG έχουν ίδια αρχή (κεφαλίδα), οπότε η αρχή δεν ξεχωρίζει φωτογραφίες.
+  try { const d = JSON.parse(init.body).contents[0].parts[0].inline_data.data; return d.length > 60 ? `${d.length}:${d.slice(-40)}` : d; } catch { return '?'; }
 }
 
 /**

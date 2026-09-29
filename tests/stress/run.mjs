@@ -6,19 +6,16 @@ import fs from 'node:fs';
 import { runCatalogSuite } from './suites/catalog.mjs';
 import { runFailureSuite, SCENARIOS, runScenario } from './suites/provider-failures.mjs';
 import { runLoadTier, realisticMock } from './suites/provider-load.mjs';
-import { runLiveQuality, cappedRecorder } from './suites/live.mjs';
 import { summarize, renderReport } from './lib/report.mjs';
 
 const env = process.env;
-const LIVE = env.LIVE === '1';
+// Το live είναι ξεχωριστό πρόγραμμα (run-live.mjs): δεν τρέχει και δεν αναμιγνύει mock tests.
+if(env.LIVE === '1' || process.argv.includes('--live')){ await import('./run-live.mjs'); process.exit(process.exitCode ?? 0); }
+const LIVE = false;
 const num = (k, d) => env[k] != null && env[k] !== '' ? Number(env[k]) : d;
 const list = (k, d) => (env[k] ?? d).split(',').map(Number).filter(Boolean);
 
-const config = LIVE ? {
-  REQUEST_COUNT: num('REQUEST_COUNT', 3), CONCURRENCY: list('CONCURRENCY', '1,2'), REQUESTS_PER_SECOND: num('REQUESTS_PER_SECOND', 0.5),
-  TIMEOUT: num('TIMEOUT', 60000), MAX_RETRIES: num('MAX_RETRIES', 0), TEST_DURATION: num('TEST_DURATION', 120000),
-  LIVE_MAX_CALLS: num('LIVE_MAX_CALLS', 40), LIVE_REPEAT: num('LIVE_REPEAT', 1), LIVE_LOAD: env.LIVE_LOAD === '1',
-} : {
+const config = {
   REQUEST_COUNT: num('REQUEST_COUNT', 50), CONCURRENCY: list('CONCURRENCY', '1,5,10,25,50'), REQUESTS_PER_SECOND: num('REQUESTS_PER_SECOND', 0),
   TIMEOUT: num('TIMEOUT', 60000), MAX_RETRIES: num('MAX_RETRIES', 0), TEST_DURATION: num('TEST_DURATION', 0),
   SCALE: num('SCALE', 0.01), MOCK_RPM: num('MOCK_RPM', 10), MOCK_LATENCY_MS: num('MOCK_LATENCY_MS', 1800), MOCK_ERROR_RATE: num('MOCK_ERROR_RATE', 0.02),
@@ -26,14 +23,6 @@ const config = LIVE ? {
 };
 const price = env.PRICE_IN_PER_M && env.PRICE_OUT_PER_M ? {in: Number(env.PRICE_IN_PER_M), out: Number(env.PRICE_OUT_PER_M)} : null;
 
-function guardLive(){
-  const key = env.GEMINI_API_KEY || '';
-  if(!key) die('LIVE=1 χρειάζεται GEMINI_API_KEY στο περιβάλλον (δεν αποθηκεύεται/δεν καταγράφεται).');
-  if(key.startsWith('sk-ant-')) die('Το live mode υποστηρίζει μόνο Gemini: η διαδρομή Claude φορτώνει το SDK από CDN, που δεν τρέχει σε Node.');
-  const maxC = Math.max(...config.CONCURRENCY);
-  if(maxC > 10 && env.ALLOW_HIGH_CONCURRENCY !== '1') die(`CONCURRENCY ${maxC} > 10 σε πραγματικό provider — βάλε ALLOW_HIGH_CONCURRENCY=1 αν το θέλεις σίγουρα.`);
-  return key;
-}
 function die(msg){ console.error(`✗ ${msg}`); process.exit(2); }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -46,7 +35,6 @@ const log = rows => { for(const r of rows) fs.appendFileSync(logFile, redact(JSO
 const say = s => process.stdout.write(redact(s) + '\n');
 
 const results = {catalog: [], failures: [], load: [], live: [], liveLoad: []};
-const apiKey = LIVE ? guardLive() : null;   // έλεγχος πριν τρέξει οτιδήποτε
 const mockOpts = {scale: config.SCALE ?? 0.01, timeout: config.TIMEOUT};
 
 // 1. Smoke test — αν αυτό δεν δουλεύει, τα υπόλοιπα νούμερα δεν σημαίνουν τίποτα.
@@ -89,28 +77,6 @@ if(!LIVE){
       say(`  c=${String(c).padStart(2)}: ${t.successful}/${t.total_requests} OK, ${t.provider_calls} κλήσεις (×${t.amplification}), 429=${t.rate_limit_errors}, 5xx=${t.provider_errors}, p95=${Math.round(t.latency_ms.p95 ?? 0)}ms`);
     }
   }
-} else {
-  const recorder = cappedRecorder(config.LIVE_MAX_CALLS);
-  say(`▸ LIVE quality — ${config.LIVE_REPEAT}× ανά φωτογραφία, όριο ${config.LIVE_MAX_CALLS} κλήσεων συνολικά`);
-  recorder.install();
-  try { results.live = log(await runLiveQuality({apiKey, repeat: config.LIVE_REPEAT, recorder})); }
-  finally { recorder.uninstall(); }
-  say(`  ${results.live.filter(r => r.pass).length} pass, ${results.live.filter(r => r.pass === false).length} fail, ${recorder.calls.length} κλήσεις`);
-  const answered = results.live.filter(r => r.final_answer != null || /Δεν βρήκα σημειώσεις/.test(r.error_shown_to_user || '')).length;
-  if(!answered) say(`  ⚠ Κανένα live case δεν πήρε απάντηση από το μοντέλο (${results.live[0]?.error_shown_to_user ?? ''}) — τα live νούμερα ποιότητας ΔΕΝ είναι έγκυρα.`);
-
-  if(config.LIVE_LOAD){
-    say(`▸ LIVE load — βαθμίδες ${config.CONCURRENCY.join(',')}, ${config.REQUEST_COUNT} αιτήματα η καθεμία, ${config.REQUESTS_PER_SECOND} req/s`);
-    const img = fs.readFileSync(new URL('./fixtures/01-normal.jpg', import.meta.url)).toString('base64');
-    for(const c of config.CONCURRENCY){
-      const rec = cappedRecorder(config.LIVE_MAX_CALLS);
-      const t = await runLoadTier({label: `live-c${c}`, concurrency: c, requestCount: config.REQUEST_COUNT, rps: config.REQUESTS_PER_SECOND,
-        timeout: config.TIMEOUT, duration: config.TEST_DURATION, harnessRetries: config.MAX_RETRIES, scale: 1, apiKey,
-        payload: () => img, price, makeProvider: () => rec});
-      results.liveLoad.push(t); log([{suite: 'live-load', ...t}]);
-      say(`  c=${c}: ${t.successful}/${t.total_requests} OK, ${t.provider_calls} κλήσεις, p95=${Math.round(t.latency_ms.p95 ?? 0)}ms`);
-    }
-  }
 }
 
 const summary = summarize(results);
@@ -118,7 +84,10 @@ const meta = {timestamp: new Date().toISOString(), mode: LIVE ? 'live' : 'mock',
 const md = renderReport({meta, results, summary});
 fs.writeFileSync(new URL('report.md', outDir), redact(md));
 fs.writeFileSync(new URL('summary.json', outDir), JSON.stringify({meta, summary}, null, 2));
-fs.copyFileSync(new URL('report.md', outDir), new URL(`./LAST_REPORT${LIVE ? '_LIVE' : ''}.md`, import.meta.url));
+fs.copyFileSync(new URL('report.md', outDir), new URL('./LAST_REPORT.md', import.meta.url));
+// Για τη σύγκριση live ↔ mock: σύνοψη και pass/fail ανά test του τελευταίου mock run.
+fs.writeFileSync(new URL('./LAST_MOCK_SUMMARY.json', import.meta.url), JSON.stringify({meta, summary,
+  tests: Object.fromEntries([...results.catalog, ...results.failures].map(r => [r.test_id, r.pass]))}, null, 2));
 
 const P = v => v == null ? 'N/A' : v + '%';
 say(`\n━━ ${summary.passed}/${summary.total} passed · retrieval ${P(summary.retrieval_accuracy)} · hallucination ${P(summary.hallucination_rate)} · injection success ${P(summary.prompt_injection_success_rate)} · provider success ${P(summary.provider_success_rate)}`);

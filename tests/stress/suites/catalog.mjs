@@ -28,9 +28,12 @@ export function evaluateCase(c){
   const reasons = [];
   let found = 0, qtyOk = 0, qtyChecked = 0;
 
+  const matched = new Set();
   for(const e of c.expect || []){
-    const l = cat.find(x => x.id === e.id);
-    if(!l){ reasons.push(`δεν βρέθηκε: ${e.id}`); continue; }
+    // Ίδιο υλικό σε πολλές γραμμές (π.χ. πλακάκι τοίχου / δαπέδου): ταιριάζουμε και με το όνομα.
+    const l = cat.find(x => x.id === e.id && !matched.has(x) && (!e.name || e.name.test(x.name)));
+    if(!l){ reasons.push(`δεν βρέθηκε: ${e.id}${e.name ? ` (${e.name.source})` : ''}`); continue; }
+    matched.add(l);
     found++;
     if(e.qty != null){ qtyChecked++; if(same(l.qty, e.qty)) qtyOk++; else reasons.push(`${e.id}: ποσότητα ${l.qty}, αναμενόταν ${e.qty}`); }
     if(e.flag != null && !!l.flag !== e.flag) reasons.push(`${e.id}: ${e.flag ? 'έπρεπε να ζητηθεί επιλογή τύπου' : 'δεν έπρεπε να ζητηθεί επιλογή'}`);
@@ -60,7 +63,7 @@ export function evaluateCase(c){
       retrieval: expected ? Math.round(100 * found / expected) : (falsePositives.length ? 0 : 100),
       quantity: qtyChecked ? Math.round(100 * qtyOk / qtyChecked) : null,
     },
-    found, expected, falsePositives,
+    found, expected, falsePositives, qtyOk, qtyChecked, lines,
     hallucination_detected: falsePositives.length > 0 || reasons.some(r => r.startsWith('παράλογη')),
     latency_ms: ms,
     informational: !!c.informational,
