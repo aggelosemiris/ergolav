@@ -34,6 +34,8 @@ const SPLIT = /[.,;!?·](?=\s|$)|\n|\s(?:και|επισησ|επειτα|μετ
 const NEG = new Set(['δεν','χωρισ','εκτοσ','οχι','μην','μη','without','no']);
 // Διόρθωση («όχι, συγγνώμη, 15 μέτρα»): η επόμενη αναφορά στο ίδιο υλικό ΑΝΤΙΚΑΘΙΣΤΑ την ποσότητα.
 const CORR = new Set(['οχι','συγγνωμη','συγνωμη','λαθοσ','τελικα','διορθωση','ενοω','δηλαδη']);
+// Ρητές λέξεις διόρθωσης για ποσότητα ΧΩΡΙΣ επανάληψη υλικού («όχι, τελικά 15 μέτρα»).
+const CORR_EXPLICIT = new Set(['οχι','τελικα','συγγνωμη','συγνωμη','διορθωση']);
 // Λέξεις γεμίσματος — μια φράση μόνο από αυτές δεν είναι υλικό.
 const FILLER = new Set(['λοιπον','εεε','εε','εμ','οκ','οκει','ναι','καλα','και','ρε','που','λεμε','ας','πουμε','τελοσ','παντων','αυτα','αυτο','ετσι']);
 
@@ -149,7 +151,7 @@ export const glueSacks = tileSqm => Math.max(1, Math.ceil(tileSqm * 5 * 1.1 / 25
 export function parse(text){
   text = cleanText(text);
   const lines = [], unknown = [];
-  let title = '', correcting = false;
+  let title = '', correcting = false, lastLine = null, prevCorr = false;
   for(const rawSeg of text.split(SPLIT)){
     const seg = rawSeg.trim();
     if(!seg) continue;
@@ -157,6 +159,8 @@ export function parse(text){
     let pending = null, pendingAt = -1, found = 0, lastNum = -2;
     const used = new Set(), seen = new Set();
     if(tokens.some(t => CORR.has(t))) correcting = true;
+    const corrHere = tokens.some(t => CORR_EXPLICIT.has(t)), corrNear = corrHere || prevCorr;
+    prevCorr = corrHere;
     for(let i = 0; i < tokens.length; i++){
       if(used.has(i)) continue;
       const n = toNumber(tokens[i], tokens[i + 1]);
@@ -175,7 +179,7 @@ export function parse(text){
       const negated = pending == null && tokens.slice(Math.max(0, i - 3), i).some(t => NEG.has(t));
       if(negated){
         found++;
-        for(let k = lines.length - 1; k >= 0; k--) if(lines[k].id === item.id) lines.splice(k, 1);
+        for(let k = lines.length - 1; k >= 0; k--) if(lines[k].id === item.id){ if(lines[k] === lastLine) lastLine = null; lines.splice(k, 1); }
         continue;
       }
       // Δεύτερη λέξη για το ίδιο υλικό στην ίδια φράση («2 κάδοι μπάζα») — όχι νέα γραμμή.
@@ -198,13 +202,31 @@ export function parse(text){
         // Διόρθωση: η νέα αναφορά αντικαθιστά την παλιά (ποσότητα και τύπο).
         Object.assign(same, {...line, qtyMissing: line.qtyMissing});
         correcting = false;
+        lastLine = same;
       } else if(same){
         same.qty += qty;
         if(!qtyMissing) same.qtyMissing = false;
         checkQty(same);
+        lastLine = same;
       } else {
         lines.push(line);
         if(correcting) correcting = false;
+        lastLine = line;
+      }
+    }
+    // Διόρθωση χωρίς επανάληψη υλικού («12 μέτρα σωλήνα, όχι, τελικά 15 μέτρα»): η νέα ποσότητα αντικαθιστά
+    // εκείνη του ΑΜΕΣΩΣ προηγούμενου υλικού μόνο αν (α) υπάρχει ρητή λέξη διόρθωσης σε αυτή ή την προηγούμενη
+    // φράση, (β) η φράση έχει μόνο ποσότητα/μονάδα/λέξεις διόρθωσης, (γ) η μονάδα είναι ρητά ίδια — χωρίς μονάδα
+    // μόνο για τεμάχια. Αλλιώς ισχύει ό,τι πριν (η ποσότητα φαίνεται ως γραμμή για έλεγχο).
+    if(!found && pending != null && lastLine && corrNear){
+      const numIdx = tokens.map((t, k) => toNumber(t) != null ? k : -1).filter(k => k >= 0);
+      const units = tokens.map(unitOf).filter(Boolean);
+      const onlyCorrection = tokens.every(t => toNumber(t) != null || unitOf(t) || CORR.has(t) || FILLER.has(t));
+      const oneNumber = numIdx.length && numIdx[numIdx.length - 1] - numIdx[0] + 1 === numIdx.length;
+      const unitOk = units.length ? units.every(u => u === lastLine.unit) : lastLine.unit === 'τεμ.';
+      if(onlyCorrection && oneNumber && unitOk){
+        lastLine.qty = pending; lastLine.qtyMissing = false; checkQty(lastLine);
+        continue;
       }
     }
     if(found) continue;

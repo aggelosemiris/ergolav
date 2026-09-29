@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-09-29T21:23:37.841Z",
+    "timestamp": "2026-09-29T21:29:12.501Z",
     "mode": "mock",
     "config": {
       "REQUEST_COUNT": 50,
@@ -34,14 +34,14 @@
     "hallucination_rate": 0,
     "prompt_injection_success_rate": null,
     "llm_output_robustness": 100,
-    "provider_success_rate": 98.4,
-    "provider_failure_rate": 1.6,
+    "provider_success_rate": 98.6,
+    "provider_failure_rate": 1.4,
     "timeout_rate": 0,
-    "rate_limit_rate": 18.4,
+    "rate_limit_rate": 18.5,
     "latency_note": "από τα load runs (μέσος όρος ανά βαθμίδα)",
-    "avg_latency": 2810.2,
-    "p95": 8382,
-    "p99": 9650
+    "avg_latency": 2743.8,
+    "p95": 9286,
+    "p99": 10778
   },
   "tests": {
     "normal-01": true,
