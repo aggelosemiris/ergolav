@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-09-29T22:39:19.384Z",
+    "timestamp": "2026-09-29T22:50:45.889Z",
     "mode": "mock",
     "config": {
       "REQUEST_COUNT": 50,
@@ -39,9 +39,9 @@
     "timeout_rate": 0,
     "rate_limit_rate": 18.2,
     "latency_note": "από τα load runs (μέσος όρος ανά βαθμίδα)",
-    "avg_latency": 2721.6,
-    "p95": 8179,
-    "p99": 10624
+    "avg_latency": 2797.7,
+    "p95": 8289,
+    "p99": 9727
   },
   "tests": {
     "normal-01": true,

@@ -5,32 +5,39 @@ const count = (s, ch) => s.split(ch).length - 1;
 
 /**
  * @returns {{value:number}|{error:string}}
- *  «1.234,50» → 1234.5 · «1234,50» → 1234.5 · «12.50» → 12.5 · «1.234.567» → 1234567
- *  «1.234» → error (χίλια διακόσια ή 1,234;) · «1,234» με maxDecimals 2 → error · «12a» → error
+ *  Ελληνική γραφή: υποδιαστολή = κόμμα, χιλιάδες = τελεία (σε ομάδες των 3).
+ *  «1.234,50» → 1234.5 · «1234,50» → 1234.5 · «1.234.567» → 1234567 · « 7 » → 7 (κενά μόνο στις άκρες)
+ *  ΜΠΛΟΚ: «1.500» (1500 ή 1,5;) · «1.5» (τελεία ως υποδιαστολή) · «1 234» (κενό ως διαχωριστικό) ·
+ *         «12,345» με maxDecimals 2 · «-3» · «12a»
+ *  Απόφαση για «1.500» (μία τελεία + 3 ψηφία): ΜΠΛΟΚ. Αλλαγή πολιτικής = ενημέρωση ΠΡΩΤΑ του
+ *  test/holdout-number.test.js (ανεξάρτητο oracle της QA).
  */
 export function parseAmount(input, {maxDecimals = 2, allowZero = false} = {}){
-  const s = String(input ?? '').replace(/[\s €]/g, '');
+  // Μόνο κενά στις άκρες και προαιρετικό «€» στο τέλος· κενό ΜΕΣΑ στον αριθμό = μπλοκ.
+  const s = String(input ?? '').replace(/^[ \t]+|[ \t]+$/g, '').replace(/[ \t]*€$/, '');
   if(!s) return {error: 'Γράψε έναν αριθμό.'};
+  if(/\s/.test(s)) return {error: `«${input}»: μην χωρίζεις τα ψηφία με κενό — γράψε π.χ. 1234 ή 1.234,00.`};
   if(!/^\d[\d.,]*$/.test(s) || /[.,]$/.test(s)) return {error: `«${input}» δεν είναι αριθμός.`};
 
   let intPart, decPart = '';
   const dots = count(s, '.'), commas = count(s, ',');
-  if(dots && commas){
-    // Και τα δύο: το τελευταίο είναι η υποδιαστολή, το άλλο πρέπει να χωρίζει σωστά χιλιάδες.
-    const dec = s.lastIndexOf(',') > s.lastIndexOf('.') ? ',' : '.', thou = dec === ',' ? '.' : ',';
-    if(count(s, dec) > 1) return {error: `«${input}»: περισσότερες από μία υποδιαστολές.`};
-    const [i, d] = s.split(dec);
-    if(!new RegExp(`^\\d{1,3}(\\${thou}\\d{3})+$`).test(i)) return {error: `«${input}»: λάθος διαχωρισμός χιλιάδων.`};
-    intPart = i.split(thou).join(''); decPart = d;
-  } else if(commas){
-    if(commas > 1) return {error: `«${input}»: ασαφές — γράψε π.χ. 1234,50.`};
-    [intPart, decPart] = s.split(',');                       // κόμμα = υποδιαστολή
+  if(commas){
+    // Υποδιαστολή μόνο το κόμμα (και μόνο ένα)· πριν από αυτό, χιλιάδες μόνο με τελείες σε ομάδες των 3.
+    if(commas > 1) return {error: `«${input}»: περισσότερα από ένα κόμματα — γράψε π.χ. 1.234,50.`};
+    if(s.lastIndexOf('.') > s.lastIndexOf(',')) return {error: `«${input}»: στα ελληνικά η υποδιαστολή είναι κόμμα — γράψε π.χ. 1.234,56.`};
+    [intPart, decPart] = s.split(',');
+    if(dots){
+      if(!/^\d{1,3}(\.\d{3})+$/.test(intPart)) return {error: `«${input}»: λάθος διαχωρισμός χιλιάδων.`};
+      intPart = intPart.split('.').join('');
+    }
   } else if(dots){
-    if(/^\d{1,3}(\.\d{3})+$/.test(s)){
-      if(dots > 1) intPart = s.split('.').join('');           // 1.234.567: σίγουρα χιλιάδες
-      else return {error: `«${input}»: ασαφές — εννοείς ${s.replace('.', '')} ή ${s.replace('.', ',')}; Γράψε το χωρίς τελεία ή με κόμμα.`};
-    } else if(dots === 1) [intPart, decPart] = s.split('.');  // 12.50: υποδιαστολή
-    else return {error: `«${input}» δεν είναι αριθμός.`};
+    if(dots > 1 && /^\d{1,3}(\.\d{3})+$/.test(s)) intPart = s.split('.').join('');   // 1.234.567: σίγουρα χιλιάδες
+    else if(/^\d{1,3}\.\d{3}$/.test(s)){
+      // «1.500»: 1500 ή 1,5; — δεν μαντεύουμε.
+      const asDec = s.replace('.', ',').replace(/0+$/, '').replace(/,$/, '');
+      return {error: `«${input}»: ασαφές — γράψε ${s.replace('.', '')} ή ${asDec}.`};
+    }
+    else return {error: `«${input}»: στα ελληνικά η υποδιαστολή είναι κόμμα — γράψε ${s.replace(/\./g, ',')}.`};
   } else intPart = s;
 
   if(decPart.length > maxDecimals) return {error: `«${input}»: έως ${maxDecimals} δεκαδικά.`};

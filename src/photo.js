@@ -24,7 +24,9 @@ const PROMPT = `Αυτή είναι φωτογραφία με σημειώσει
 // Εξ ορισμού το key μένει ΜΟΝΟ στη μνήμη της σελίδας (χάνεται με το κλείσιμο). Στο localStorage μπαίνει
 // μόνο αν ο χρήστης το ζητήσει ρητά — και ποτέ σε κοινόχρηστο domain (π.χ. raw.githack.com), όπου
 // οποιαδήποτε άλλη σελίδα του ίδιου domain θα μπορούσε να το διαβάσει.
-const SHARED_HOSTS = /(^|\.)(raw\.githack\.com|rawcdn\.githack\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|htmlpreview\.github\.io)$/;
+// Κοινόχρηστα origins: όλα τα project pages ενός λογαριασμού GitHub μοιράζονται το <user>.github.io,
+// οπότε κάθε άλλο repo του ίδιου λογαριασμού θα μπορούσε να διαβάσει το localStorage. «Θυμήσου» μόνο σε δικό σου domain.
+const SHARED_HOSTS = /(^|\.)(raw\.githack\.com|rawcdn\.githack\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|github\.io|gitlab\.io|pages\.dev|netlify\.app|vercel\.app)$/;
 export const canRememberKey = () => { try { return !SHARED_HOSTS.test(location.hostname); } catch { return false; } };
 let memKey = '';
 const store = {

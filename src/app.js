@@ -1,3 +1,8 @@
+// Να μην τρέχει μέσα σε ξένο iframe (clickjacking — η CSP μέσω <meta> δεν υποστηρίζει frame-ancestors).
+if(window.top !== window.self){
+  document.body.innerHTML = '<p style="padding:24px;font:17px system-ui">Η εφαρμογή ανοίγει μόνο απευθείας, όχι μέσα σε άλλη σελίδα.</p>';
+  throw new Error('framed');
+}
 import { parse, glueSacks } from './parse.js';
 import { createMic, micSupported } from './mic.js';
 import { readNotes, shrink, getKey, setKey, forgetKey, canRememberKey, isKeyRemembered, keyProvider } from './photo.js';
@@ -368,13 +373,10 @@ function renderLines(){
   cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0,
       left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : '');
 }
-// ΦΠΑ: επιλέγεται ανά προσφορά (προτίμηση συσκευής). Μειωμένοι συντελεστές νησιών: −30% (24→17, 13→9, 6→4)
-// σε Λέρο, Λέσβο, Κω, Σάμο, Χίο και, από 1/1/2026, σε νησιά Β. Αιγαίου/Δωδεκανήσου έως 20.000 κατοίκους.
-// Ο σωστός συντελεστής εξαρτάται από τόπο και είδος εργασίας — τον επιβεβαιώνει ο λογιστής.
-const VAT_RATES = [
-  [24, '24% — κανονικός'], [17, '17% — μειωμένος νησιών'], [13, '13% — μειωμένος'], [9, '9% — μειωμένος νησιών'],
-  [6, '6% — υπερμειωμένος'], [4, '4% — υπερμειωμένος νησιών'], [0, '0% — απαλλαγή'],
-];
+// ΦΠΑ: τον συντελεστή τον ΕΠΙΛΕΓΕΙ ο τεχνίτης (προτίμηση συσκευής, προεπιλογή 24%). Η εφαρμογή δεν προτείνει
+// και δεν ελέγχει ποιος ισχύει (εξαρτάται από τόπο, είδος εργασίας, προϋποθέσεις)· ευθύνη τεχνίτη/λογιστή.
+// Πηγές για τους αριθμούς: docs/SOURCES.md.
+const VAT_RATES = [24, 17, 13, 9, 6, 4, 0].map(r => [r, `${r}%`]);
 let vatRate = (() => { try { const v = Number(localStorage.getItem('ergolav.vat')); return VAT_RATES.some(([r]) => r === v) && localStorage.getItem('ergolav.vat') !== null ? v : 24; } catch { return 24; } })();
 function setVat(v){ vatRate = v; try { localStorage.setItem('ergolav.vat', String(v)); } catch {} }
 
@@ -394,7 +396,7 @@ function renderTotals(){
     <div class="t big"><span>Σύνολο</span><span class="num">${eur(s.total)}</span></div>
     <label class="vat">Συντελεστής ΦΠΑ
       <select id="vatRate">${VAT_RATES.map(([r, t]) => `<option value="${r}"${r === vatRate ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-    <p class="privacy">Ο σωστός συντελεστής εξαρτάται από το νησί/περιοχή και το είδος της εργασίας — επιβεβαίωσέ τον με τον λογιστή σου.</p>`;
+    <p class="privacy">Η εφαρμογή δεν ελέγχει ποιος συντελεστής ΦΠΑ ισχύει. Τον επιλέγεις εσύ, με ευθύνη δική σου ή του λογιστή σου.</p>`;
   $('vatRate').onchange = e => { setVat(Number(e.target.value)); renderTotals(); };
 }
 

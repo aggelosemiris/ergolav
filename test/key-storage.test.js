@@ -12,7 +12,7 @@ const load = tag => import(`../src/photo.js?t=${tag}`);
 const KEY = 'AIza' + 'Q'.repeat(35);
 
 test('εξ ορισμού το key μένει μόνο στη μνήμη', async () => {
-  const data = env('aggelosemiris.github.io');
+  const data = env('ergolav.gr');
   const m = await load('mem');
   m.setKey(KEY);
   assert.equal(m.getKey(), KEY);
@@ -20,7 +20,7 @@ test('εξ ορισμού το key μένει μόνο στη μνήμη', async
 });
 
 test('«θυμήσου» σε δικό σου domain → αποθηκεύεται· «ξέχασε» → σβήνει', async () => {
-  const data = env('aggelosemiris.github.io');
+  const data = env('ergolav.gr');
   const m = await load('remember');
   m.setKey(KEY, {remember: true});
   assert.equal(data['ergolav.apiKey'], KEY);
@@ -37,4 +37,12 @@ test('κοινόχρηστο domain (raw.githack.com): ποτέ αποθήκευ
   m.setKey(KEY, {remember: true});
   assert.equal(m.getKey(), KEY, 'δουλεύει για αυτή τη συνεδρία');
   assert.deepEqual(Object.keys(data), [], 'αλλά δεν γράφεται πουθενά');
+});
+
+test('το <user>.github.io είναι κοινόχρηστο (όλα τα repo του λογαριασμού) → ποτέ αποθήκευση', async () => {
+  const data = env('aggelosemiris.github.io');
+  const m = await load('ghpages');
+  assert.equal(m.canRememberKey(), false);
+  m.setKey(KEY, {remember: true});
+  assert.deepEqual(Object.keys(data), []);
 });
