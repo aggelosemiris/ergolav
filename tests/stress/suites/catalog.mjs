@@ -45,7 +45,8 @@ export function evaluateCase(c){
   if(c.unknownMin != null && unknown.length < c.unknownMin) reasons.push(`χάθηκε πληροφορία: ${unknown.length} γραμμές εκτός καταλόγου, αναμένονταν ≥ ${c.unknownMin}`);
   if(c.unknownMax != null && unknown.length > c.unknownMax) reasons.push(`σκουπίδια ως γραμμές προσφοράς: ${unknown.map(u => `«${u.name}»`).join(', ')}`);
   if(c.qtyMax != null){
-    for(const l of lines) if(l.qty > c.qtyMax) reasons.push(`παράλογη ποσότητα έγινε δεκτή: ${l.qty} × ${l.name}`);
+    // Αποτυχία μόνο αν η παράλογη ποσότητα μπαίνει ΣΙΩΠΗΛΑ (χωρίς σημαία επιβεβαίωσης qtyCheck)
+    for(const l of lines) if(l.qty > c.qtyMax && !l.qtyCheck) reasons.push(`παράλογη ποσότητα έγινε δεκτή σιωπηλά: ${l.qty} × ${l.name}`);
   }
   if(c.title != null && r.title !== c.title) reasons.push(`τίτλος «${r.title}», αναμενόταν «${c.title}»`);
 
@@ -53,7 +54,7 @@ export function evaluateCase(c){
   return {
     test_id: c.id, suite: 'catalog', category: c.category, timestamp: new Date().toISOString(),
     query: c.input, note: c.note,
-    retrieved: lines.map(l => ({id: l.id, name: l.name, qty: l.qty, unit: l.unit, flag: !!l.flag, unknown: !!l.unknown, suggest: !!l.suggest})),
+    retrieved: lines.map(l => ({id: l.id, name: l.name, qty: l.qty, unit: l.unit, flag: !!l.flag, qtyCheck: !!l.qtyCheck, qtyMissing: !!l.qtyMissing, unknown: !!l.unknown, suggest: !!l.suggest})),
     expected_behaviour: {expect: c.expect || [], forbid: c.forbid || [], exact: !!c.exact, unknownMin: c.unknownMin, unknownMax: c.unknownMax, qtyMax: c.qtyMax},
     scores: {
       retrieval: expected ? Math.round(100 * found / expected) : (falsePositives.length ? 0 : 100),

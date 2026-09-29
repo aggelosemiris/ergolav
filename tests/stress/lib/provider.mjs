@@ -21,8 +21,14 @@ export function mockProvider(clock, handler){
     const call = {n: calls.length + 1, model: m[1], tag: requestTag(init), at: clock.now()};
     calls.push(call);
     const spec = await handler(call) ?? {};
-    if(spec.hang){ call.outcome = 'hang'; return new Promise(() => {}); }
-    if(spec.delayMs) await clock.sleep(spec.delayMs);
+    // Όπως το πραγματικό fetch: αν ο client ακυρώσει (timeout), το αίτημα αποτυγχάνει με AbortError.
+    const aborted = new Promise((_, fail) => init.signal?.addEventListener('abort', () => {
+      call.outcome = 'aborted'; call.latency = clock.now() - call.at;
+      fail(new DOMException('The operation was aborted.', 'AbortError'));
+    }, {once: true}));
+    aborted.catch(() => {});
+    if(spec.hang){ call.outcome = 'hang'; return aborted; }
+    if(spec.delayMs) await Promise.race([clock.sleep(spec.delayMs), aborted]);
     call.latency = clock.now() - call.at;
     if(spec.networkError){ call.outcome = 'network'; throw new TypeError('Failed to fetch'); }
     call.status = spec.status ?? 200;

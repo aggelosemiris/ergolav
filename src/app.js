@@ -1,4 +1,4 @@
-import { parse } from './parse.js';
+import { parse, glueSacks } from './parse.js';
 import { createMic, micSupported } from './mic.js';
 import { readNotes, shrink, getKey, setKey } from './photo.js';
 import { makePdf, shareFile, download } from './share.js';
@@ -144,11 +144,12 @@ async function readPhoto(img){
   cta('Διαβάζω…', null, true);
   $('listenLabel').textContent = 'Διαβάζω τις σημειώσεις σου…';
   try {
-    const text = await readNotes(img.data, {onStatus: s => $('listenLabel').textContent = s});
+    let warning = '';
+    const text = await readNotes(img.data, {onStatus: s => $('listenLabel').textContent = s, onWarning: w => warning = w});
     pendingPhoto = null;
     shot.classList.remove('reading');
-    review(text);
-    buildLines(text);
+    review(text, warning);
+    buildLines(text, warning);
   } catch (err) {
     shot.classList.remove('reading');
     const msg = err.message === 'NO_KEY' ? '' : err.message;
@@ -180,10 +181,12 @@ $('keySave').onclick = () => {
 
 // ─── 3 : γραμμές ─────────────────────────────────────────────
 function lineTotal(l){ return Math.round(l.qty*(l.mat+l.lab)); }
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown).length; }
+const needsQty = l => l.qtyMissing || l.qtyCheck;
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l)).length; }
 
-function buildLines(text){
+function buildLines(text, warning){
   const r = parse(text);
+  $('linesNotice').hidden = !warning; $('linesNotice').textContent = warning || '';
   if(!r.lines.length){
     notice('Δεν βρήκα υλικά στο κείμενο. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
     return;
@@ -193,10 +196,13 @@ function buildLines(text){
   renderLines();
 }
 function renderLines(){
+  // Η προτεινόμενη κόλλα ακολουθεί τα τ.μ. πλακακιού όσο δεν την έχει επιβεβαιώσει ο χρήστης.
+  const glue = LINES.find(l => l.id === 'glue' && l.suggest);
+  if(glue) glue.qty = glueSacks(LINES.filter(l => l.id === 'tile').reduce((s, l) => s + l.qty, 0));
   const box = $('lines'); box.innerHTML = '';
   LINES.forEach((l,i)=>{
     const el = document.createElement('div');
-    el.className = 'ln' + ((l.flag||l.suggest||l.unknown)?' flag':'');
+    el.className = 'ln' + ((l.flag||l.suggest||l.unknown||needsQty(l))?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
     if(l.unknown){
       const per = esc(l.unit || 'τεμ.');
@@ -235,6 +241,20 @@ function renderLines(){
         <div class="sug-act"><button data-a="keep">Ναι, πρόσθεσέ το</button><button data-a="drop">Όχι</button></div>`;
       el.querySelector('[data-a="keep"]').onclick=()=>{ l.suggest=false; checkedCount++; renderLines(); };
       el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
+    } else if(needsQty(l)){
+      // Ποσότητα που δεν ειπώθηκε ή φαίνεται παράλογη (π.χ. 999, τιμή που διαβάστηκε ως ποσότητα): επιβεβαίωση.
+      el.innerHTML = `
+        <div class="ln-top"><span class="ln-name">${esc(l.name)}</span></div>
+        <div class="ask">${l.qtyMissing ? `Δεν είπες ποσότητα (${esc(l.unit)}) — γράψε πόσα:` : `${fmtQty(l.qty)} ${esc(l.unit)}; Φαίνεται πολύ — έλεγξε την ποσότητα:`}</div>
+        <div class="prices"><label>Ποσότητα (${esc(l.unit)})<input inputmode="decimal" data-p="qty" value="${l.qtyMissing ? '' : fmtQty(l.qty)}" placeholder="0"></label></div>
+        <div class="sug-act"><button data-a="ok">Εντάξει</button><button data-a="drop">Βγάλ' το</button></div>`;
+      el.querySelector('[data-a="ok"]').onclick=()=>{
+        const q = parseFloat((el.querySelector('[data-p="qty"]').value || '').replace(/\s/g,'').replace(',', '.'));
+        if(!(q > 0)){ el.querySelector('[data-p="qty"]').focus(); return; }
+        Object.assign(l, {qty: q, qtyMissing: false, qtyCheck: false});
+        checkedCount++; renderLines();
+      };
+      el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
     } else {
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${esc(l.name)}</span><span class="ln-sum num">${eur(lineTotal(l))}</span></div>
@@ -256,7 +276,7 @@ function renderLines(){
       left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : '');
 }
 function sums(){
-  const ok = LINES.filter(l=>!l.flag && !l.suggest && !l.unknown);
+  const ok = LINES.filter(l=>!l.flag && !l.suggest && !l.unknown && !needsQty(l));
   const mat = ok.reduce((s,l)=>s+Math.round(l.qty*l.mat),0);
   const lab = ok.reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
   const net = mat+lab, vat = Math.round(net*0.24);

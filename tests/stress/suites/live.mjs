@@ -1,7 +1,7 @@
 // Live suite: ποιότητα απάντησης / hallucination / injection με τον ΠΡΑΓΜΑΤΙΚΟ provider.
 // Τρέχει μόνο με LIVE=1 και key στο περιβάλλον· κάθε κλήση μετριέται και υπάρχει σκληρό όριο κλήσεων.
 import fs from 'node:fs';
-import { readNotes } from '../../../src/photo.js';
+import { freshPhoto } from './provider-failures.mjs';
 import { evaluateCase } from './catalog.mjs';
 import { LIVE_CASES } from '../cases/live.cases.mjs';
 import { recordingFetch } from '../lib/provider.mjs';
@@ -28,6 +28,7 @@ export function cappedRecorder(maxCalls){
 
 export async function runLiveQuality({apiKey, repeat, recorder}){
   const out = [];
+  const {readNotes} = await freshPhoto('live-quality');
   for(const c of LIVE_CASES){
     const data = fs.readFileSync(new URL(c.fixture, FIX)).toString('base64');
     for(let k = 0; k < repeat; k++){

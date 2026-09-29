@@ -97,3 +97,45 @@ test('ανακαίνιση μπάνιου: εργασίες, οικοδομικ�
   assert.equal(byId(r, 'glue')[0].qty, 3);
   assert.equal(byId(r, 'tile').length, 0, 'η «κόλλα πλακιδίων» δεν είναι πλακάκι');
 });
+
+test('διορθώσεις και αρνήσεις στην ομιλία', () => {
+  assert.equal(byId(parse('12 μέτρα σωλήνα, όχι συγγνώμη, 15 μέτρα σωλήνα'), 'pipe')[0].qty, 15);
+  assert.equal(byId(parse('δύο λεκάνες, όχι, τελικά μία λεκάνη'), 'wc')[0].qty, 1);
+  assert.equal(byId(parse('δεν χρειάζεται θερμοσίφωνας, έχει ηλιακό'), 'heater').length, 0);
+  assert.equal(byId(parse('όλα εκτός από την μπανιέρα'), 'bathtub').length, 0);
+});
+
+test('τιμές δεν γίνονται ποσότητες, παράλογες ποσότητες ζητούν επιβεβαίωση', () => {
+  assert.equal(byId(parse('λεκάνη κρεμαστή 185€'), 'wc')[0].qty, 1);
+  const wc = byId(parse('999 λεκάνες κρεμαστές'), 'wc')[0];
+  assert.equal(wc.qty, 999);
+  assert.equal(wc.qtyCheck, true);
+  const tile = byId(parse('πλακάκι τοίχου λευκό'), 'tile')[0];
+  assert.equal(tile.qtyMissing, true, 'δεν ειπώθηκαν τ.μ. — πρέπει να ζητηθούν');
+  assert.equal(byId(parse('μία λεκάνη'), 'wc')[0].qtyMissing, undefined);
+});
+
+test('λέξεις που μοιάζουν αλλά σημαίνουν άλλο', () => {
+  const r = parse('δέκα τετραγωνικά πορτοκαλί πλακάκι');
+  assert.equal(byId(r, 'door').length, 0);
+  assert.equal(byId(r, 'tile')[0].qty, 10);
+  assert.equal(parse('να πάρω μπαταρία αυτοκινήτου').lines.filter(l => !l.unknown).length, 0);
+  assert.equal(parse('θα το βρίσκεις στο ντουλάπι').lines.filter(l => l.id === 'tap').length, 0);
+});
+
+test('συνώνυμα, ορθογραφικά, αριθμοί, greeklish, αγγλικά', () => {
+  assert.equal(byId(parse('ένα λαβομάνο'), 'basin').length, 1);
+  assert.equal(byId(parse('ένα ρεζερβουάρ εντοιχισμού'), 'tank').length, 1);
+  assert.equal(byId(parse('σολήνας 12 μετρα'), 'pipe')[0].qty, 12);
+  assert.equal(byId(parse('δυόμισι μέτρα σωλήνα'), 'pipe')[0].qty, 2.5);
+  assert.equal(byId(parse('εκατόν είκοσι πέντε μέτρα καλώδιο'), 'cable')[0].qty, 125);
+  assert.equal(byId(parse('dwdeka metra swlina'), 'pipe')[0].qty, 12);
+  const en = parse('12 meters of pipe and one toilet');
+  assert.equal(byId(en, 'pipe')[0].qty, 12);
+  assert.equal(byId(en, 'wc')[0].qty, 1);
+});
+
+test('καθάρισμα εξόδου μοντέλου (εισαγωγή, markdown πίνακας)', () => {
+  const r = parse('Ορίστε οι σημειώσεις που διάβασα:\n| Υλικό | Ποσότητα |\n|---|---|\n| Σωλήνας | 12 μ. |\n| Λεκάνη | 1 |');
+  assert.deepEqual(r.lines.map(l => [l.id, l.qty]), [['pipe', 12], ['wc', 1]]);
+});

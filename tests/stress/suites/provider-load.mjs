@@ -1,7 +1,7 @@
 // Suite I/K/L/N/O: ελεγχόμενο load test πάνω στον πραγματικό κώδικα (readNotes).
 // Mock mode: ψεύτικος Gemini με όριο αιτημάτων/λεπτό ανά μοντέλο, log-normal latency, τυχαία 503.
 // Live mode: ίδιος runner με recordingFetch και αυστηρά όρια (βλ. run.mjs).
-import { readNotes } from '../../../src/photo.js';
+import { freshPhoto } from './provider-failures.mjs';
 import { installClock } from '../lib/clock.mjs';
 import { mockProvider, ok, err } from '../lib/provider.mjs';
 import { latencySummary, rng, lognormal, round, pct } from '../lib/stats.mjs';
@@ -28,6 +28,7 @@ export function realisticMock(clock, {rpm, latencyMs, errorRate, seed = 7}){
  */
 export async function runLoadTier({label, concurrency, requestCount, rps = 0, timeout, duration, harnessRetries = 0,
                                    scale, apiKey, makeProvider, payload, price}){
+  const {readNotes} = await freshPhoto(label);            // μία συνεδρία ανά βαθμίδα (όπως ένα κοινό key)
   const clock = installClock(scale);
   const provider = makeProvider(clock);
   provider.install();

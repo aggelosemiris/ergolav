@@ -84,8 +84,10 @@ export function renderReport({meta, results, summary}){
       test_id: `load-${name}`, priority: worst < 95 ? 'HIGH' : rl ? 'MEDIUM' : 'LOW',
       query: `προφίλ ${name}, concurrency ${ts.map(t => t.concurrency).join('/')}`,
       failure_reason: `χειρότερη επιτυχία ${worst}% · ×${Math.min(...amp)}–×${Math.max(...amp)} HTTP κλήσεις ανά πάτημα · 429: ${rl} · p95 ${Math.min(...p95)}–${Math.max(...p95)} ms`,
-      root_cause: rl ? 'retry mechanism — στο 429 ξαναστέλνει αμέσως σε άλλα μοντέλα και αγνοεί Retry-After (επιβαρύνει το ίδιο όριο)'
-                     : 'retry mechanism — σωστή ανάκαμψη, αλλά με σταθερό backoff 3s/8s χωρίς jitter (καθυστέρηση)',
+      root_cause: worst < 95
+        ? `provider — χωρητικότητα: τα ταυτόχρονα αιτήματα ξεπερνούν το όριο αιτημάτων/λεπτό (χειρότερο στο c=${ts.find(t => t.success_rate === worst).concurrency}). Client-side δεν λύνεται· χρειάζεται ουρά (backend) ή μεγαλύτερο όριο`
+        : rl ? 'retry mechanism — επιπλέον κλήσεις για να βρεθεί μοντέλο με διαθέσιμο όριο (429)'
+             : 'retry mechanism — επιτυχής ανάκαμψη· το κόστος είναι καθυστέρηση από τα retries/backoff',
     }];
   });
   const all = [...failed, ...loadIssues];

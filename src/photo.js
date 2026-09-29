@@ -46,84 +46,180 @@ let clientPromise = null;
 async function client(apiKey){
   if(!clientPromise) clientPromise = import(SDK_URL).catch(e => { clientPromise = null; throw e; });
   const { default: Anthropic } = await clientPromise;
-  return {Anthropic, api: new Anthropic({apiKey, dangerouslyAllowBrowser: true})};
+  // timeout 45s και 2 retries (το SDK τηρεί μόνο του το Retry-After και κάνει εκθετικό backoff)
+  return {Anthropic, api: new Anthropic({apiKey, dangerouslyAllowBrowser: true, timeout: 45000, maxRetries: 2})};
 }
 
 // Μόνο τα κλειδιά Anthropic έχουν σταθερό πρόθεμα· οτιδήποτε άλλο το δοκιμάζουμε στη Google.
 const isGoogleKey = k => !k.startsWith('sk-ant-');
 
-/** Επιστρέφει το κείμενο των σημειώσεων ή ρίχνει Error με ελληνικό μήνυμα. */
-export async function readNotes(base64, {apiKey = getKey(), onStatus} = {}){
+/**
+ * Επιστρέφει το κείμενο των σημειώσεων ή ρίχνει Error με ελληνικό μήνυμα.
+ * onStatus(msg): πρόοδος (π.χ. «ξαναδοκιμάζω»). onWarning(msg): το κείμενο ήρθε αλλά ίσως ελλιπές.
+ */
+export async function readNotes(base64, {apiKey = getKey(), onStatus, onWarning} = {}){
   if(!apiKey) throw new Error('NO_KEY');
-  const text = isGoogleKey(apiKey) ? await readWithGemini(base64, apiKey, onStatus) : await readWithClaude(base64, apiKey);
-  if(!text || /ΚΑΜΙΑ ΣΗΜΕΙΩΣΗ/.test(text)) throw new Error('Δεν βρήκα σημειώσεις υλικών στη φωτογραφία.');
-  return text;
+  const text = isGoogleKey(apiKey) ? await readWithGemini(base64, apiKey, onStatus, onWarning) : await readWithClaude(base64, apiKey, onWarning);
+  // «Δεν υπάρχουν σημειώσεις» μόνο αν ΟΛΗ η απάντηση είναι αυτή — όχι αν η φράση εμφανίζεται κάπου μέσα
+  // (π.χ. γραμμένη στη φωτογραφία), ώστε κείμενο της φωτογραφίας να μην ακυρώνει την ανάγνωση.
+  const lines = (text || '').split('\n').filter(l => !/^\s*ΚΑΜΙΑ ΣΗΜΕΙΩΣΗ\.?\s*$/i.test(l));
+  if(!lines.join('').trim()){
+    if(/ΚΑΜΙΑ ΣΗΜΕΙΩΣΗ/i.test(text || '')) throw new Error('Δεν βρήκα σημειώσεις υλικών στη φωτογραφία.');
+    throw new Error('Η υπηρεσία ανάγνωσης δεν επέστρεψε κείμενο. Δοκίμασε ξανά.');
+  }
+  return lines.join('\n').trim();
 }
 
 // Google Gemini (δωρεάν επίπεδο με όρια — στο δωρεάν επίπεδο η Google μπορεί να κρατά τα δεδομένα για βελτίωση).
-// Αν ένα μοντέλο δεν υπάρχει (404), είναι φορτωμένο (5xx) ή τελείωσε το δωρεάν όριό του (429 — μετράει
-// ξεχωριστά ανά μοντέλο), δοκιμάζουμε το επόμενο· αν αποτύχουν όλα από φόρτο, ξαναδοκιμάζουμε λίγο αργότερα.
+// Πολιτική κλήσεων:
+//  - timeout 20s ανά κλήση και 45s συνολικά (η οθόνη δεν κολλάει ποτέ)
+//  - 404 → το μοντέλο δεν υπάρχει, επόμενο· 5xx / άκυρη απάντηση / timeout → επόμενο μοντέλο
+//  - 429 → το μοντέλο «κλειδώνει» μέχρι να περάσει το Retry-After (τα όρια μετράνε ανά μοντέλο)
+//  - όταν δεν μένει διαθέσιμο μοντέλο: αναμονή με εκθετικό backoff + jitter, ή όσο λέει το Retry-After
+//  - παροδικό σφάλμα δικτύου → 1 επανάληψη· συνολικά το πολύ 10 κλήσεις ανά φωτογραφία
+//  - τα «κλειδωμένα» (429) και τα ανύπαρκτα (404) μοντέλα θυμούνται για όλη τη συνεδρία, ώστε η επόμενη
+//    φωτογραφία να μην ξαναχτυπήσει μοντέλο που μόλις είπε «όριο»
 const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
-const RETRY_WAITS = [0, 3000, 8000];
-const busy = s => s === 429 || s >= 500;
+const CALL_TIMEOUT = 20000, TOTAL_BUDGET = 45000, MAX_CALLS = 10, MAX_RATE_WAIT = 20000;
+const lockedUntil = {}, gone = new Set();           // κοινά για όλες τις αναγνώσεις της συνεδρίας
+const BACKOFF = [2000, 5000];                           // ms, ±30% jitter
+const jitter = ms => Math.round(ms * (0.7 + Math.random() * 0.6));
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 const mask = k => `${k.slice(0, 6)}…${k.slice(-4)} (${k.length} χαρακτήρες)`;
 
-async function readWithGemini(base64, apiKey, onStatus){
+function retryAfterMs(r){
+  const v = r.headers?.get?.('retry-after');
+  if(!v) return null;
+  const sec = Number(v);
+  if(Number.isFinite(sec)) return sec * 1000;
+  const at = Date.parse(v);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
+
+/** Μία κλήση με timeout. Επιστρέφει {kind, status, body, retryAfter} — ποτέ δεν ρίχνει. */
+async function callGemini(model, apiKey, base64, timeoutMs){
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST', signal: ctl.signal,
+      headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+      body: JSON.stringify({contents: [{parts: [
+        {inline_data: {mime_type: 'image/jpeg', data: base64}},
+        {text: PROMPT},
+      ]}]}),
+    });
+    let body = null;
+    try { body = await r.json(); } catch { if(r.ok) return {kind: 'bad', status: r.status}; body = {}; }
+    if(r.ok) return {kind: 'ok', status: r.status, body};
+    return {kind: 'http', status: r.status, body, retryAfter: retryAfterMs(r)};
+  } catch {
+    return ctl.signal.aborted ? {kind: 'timeout'} : {kind: 'network'};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readWithGemini(base64, apiKey, onStatus, onWarning){
   // Κομμένο/κρυμμένο αντίγραφο (π.χ. «AIzaSy…••••Xyz9»): δεν αξίζει να το στείλουμε.
   if(apiKey.length < 30 || /[…•*·]|\.\.\./.test(apiKey)){
     setKey('');
     throw new Error(`Αυτό μοιάζει με κομμένο αντίγραφο του key: ${mask(apiKey)}. Τα κλειδιά Google έχουν ~39 χαρακτήρες ` +
       'και ξεκινούν με AIza. Στο AI Studio πάτα το εικονίδιο αντιγραφής δίπλα στο key — όχι το κείμενο με τις τελείες.');
   }
-  let r, body, lastBusy = null;
-  rounds: for(const [round, wait] of RETRY_WAITS.entries()){
-    if(wait){
-      onStatus?.(`Η Google είναι φορτωμένη — ξαναδοκιμάζω (${round}/${RETRY_WAITS.length - 1})…`);
-      await new Promise(ok => setTimeout(ok, wait));
+  const start = Date.now();
+  const triedThisRound = new Set();
+  let calls = 0, round = 0, netRetries = 0, last = null;
+
+  while(calls < MAX_CALLS){
+    const now = Date.now(), remaining = TOTAL_BUDGET - (now - start);
+    if(remaining <= 0) break;
+    const model = GEMINI_MODELS.find(m => !gone.has(m) && !triedThisRound.has(m) && !((lockedUntil[m] ?? 0) > now));
+    if(!model){
+      const alive = GEMINI_MODELS.filter(m => !gone.has(m));
+      if(!alive.length) break;                                                    // κανένα μοντέλο δεν υπάρχει
+      // Αναμονή: μέχρι να ξεκλειδώσει το πρώτο μοντέλο (Retry-After), αλλιώς εκθετικό backoff.
+      const unlock = Math.min(...alive.map(m => lockedUntil[m] ?? Infinity)) - now;
+      const allLocked = alive.every(m => (lockedUntil[m] ?? 0) > now);
+      const wait = allLocked ? unlock : (round < BACKOFF.length ? jitter(BACKOFF[round]) : Infinity);
+      if(wait > remaining || (allLocked && wait > MAX_RATE_WAIT)) break;
+      onStatus?.(allLocked ? `Όριο της Google — περιμένω ${Math.ceil(wait / 1000)} δευτ.…` : `Η Google είναι φορτωμένη — ξαναδοκιμάζω (${round + 1}/${BACKOFF.length})…`);
+      await sleep(wait);
+      round++; triedThisRound.clear();
+      continue;
     }
-    for(const model of GEMINI_MODELS){
-      try {
-        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
-          body: JSON.stringify({contents: [{parts: [
-            {inline_data: {mime_type: 'image/jpeg', data: base64}},
-            {text: PROMPT},
-          ]}]}),
-        });
-      } catch { throw new Error('Δεν υπάρχει σύνδεση στο internet.'); }
-      body = await r.json().catch(() => ({}));
-      if(busy(r.status)) lastBusy = {r, body};
-      else if(r.status !== 404) break rounds; // επιτυχία ή λάθος που δεν λύνεται με άλλο μοντέλο
+    triedThisRound.add(model);
+    calls++;
+    const res = await callGemini(model, apiKey, base64, Math.min(CALL_TIMEOUT, remaining));
+    if(res.kind === 'ok'){
+      const out = geminiText(res.body, onWarning);
+      if(out != null) return out;
+      last = {kind: 'bad'};                                                       // 200 χωρίς χρήσιμο περιεχόμενο → επόμενο μοντέλο
+      continue;
     }
-    // Όλα τα μοντέλα είναι απλώς ανύπαρκτα (404): δεν έχει νόημα να περιμένουμε.
-    if(!lastBusy) break;
+    last = res;
+    if(res.kind === 'network'){
+      if(netRetries++ < 1){ await sleep(jitter(1500)); triedThisRound.delete(model); continue; }
+      break;                                                                      // δεύτερη αποτυχία δικτύου: δεν υπάρχει σύνδεση
+    }
+    if(res.kind === 'timeout' || res.kind === 'bad') continue;
+    if(res.status === 404){ gone.add(model); continue; }
+    if(res.status === 429){ lockedUntil[model] = Date.now() + (res.retryAfter ?? 20000); continue; }
+    if(res.status >= 500) continue;
+    break;                                                                        // 400/401/403 κ.λπ.: δεν λύνεται με επανάληψη
   }
-  // Αναφέρουμε τον φόρτο, όχι το 404 κάποιου μοντέλου που απλώς δεν υπάρχει.
-  if(r.status === 404 && lastBusy) ({r, body} = lastBusy);
-  if(!r.ok){
-    const err = body.error || {};
-    const reason = err.details?.find(d => d.reason)?.reason || err.status || '';
-    const google = err.message ? ` Η Google λέει: «${err.message}»` : '';
-    if(reason === 'API_KEY_INVALID'){
-      setKey('');
-      throw new Error(`Η Google δεν αναγνωρίζει το key ${mask(apiKey)}. Φτιάξε/αντέγραψε νέο από το aistudio.google.com/apikey.`);
-    }
-    if(reason === 'SERVICE_DISABLED' || /has not been used|is disabled/i.test(err.message || ''))
-      throw new Error('Το key είναι από project όπου δεν είναι ενεργό το Gemini API. Φτιάξε key από το aistudio.google.com/apikey.' + google);
-    if(reason === 'API_KEY_HTTP_REFERRER_BLOCKED' || reason === 'API_KEY_SERVICE_BLOCKED' || r.status === 403)
-      throw new Error('Το key έχει περιορισμούς (sites/APIs) που μπλοκάρουν αυτή τη σελίδα. Βγάλε τους περιορισμούς ή φτιάξε νέο key.' + google);
-    if(r.status === 429) throw new Error('Έφτασες το δωρεάν όριο της Google. Δοκίμασε σε λίγο.' + google);
-    if(r.status >= 500) throw new Error('Οι servers της Google είναι φορτωμένοι αυτή τη στιγμή — δεν φταίει το key σου. Δοκίμασε ξανά σε λίγα λεπτά.');
-    if(/location is not supported/i.test(err.message || '')) throw new Error('Η Google δεν δίνει το δωρεάν Gemini API σε αυτή τη χώρα.' + google);
-    throw new Error(`Η ανάγνωση απέτυχε (${r.status}).` + google);
-  }
-  const cand = body.candidates?.[0];
-  if(!cand || cand.finishReason === 'SAFETY') throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί.');
-  return (cand.content?.parts || []).map(p => p.text || '').join('\n').trim();
+  throw geminiError(last, apiKey, lockedUntil);
 }
 
-async function readWithClaude(base64, apiKey){
+/** Κείμενο από επιτυχημένη απάντηση· null αν η δομή δεν είναι έγκυρη. Ρίχνει μόνο για άρνηση περιεχομένου. */
+function geminiText(body, onWarning){
+  const cand = Array.isArray(body?.candidates) ? body.candidates[0] : null;
+  if(!cand){
+    if(body?.promptFeedback?.blockReason) throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί (απορρίφθηκε από την υπηρεσία).');
+    return null;
+  }
+  if(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII'].includes(cand.finishReason))
+    throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί (απορρίφθηκε από την υπηρεσία).');
+  const parts = Array.isArray(cand.content?.parts) ? cand.content.parts : [];
+  const text = parts.map(p => typeof p?.text === 'string' ? p.text : '').join('\n').trim();
+  if(!text) return null;
+  if(cand.finishReason === 'MAX_TOKENS') onWarning?.('Η ανάγνωση κόπηκε πριν τελειώσει — μπορεί να λείπουν υλικά από το τέλος της λίστας. Έλεγξε τη φωτογραφία.');
+  return text;
+}
+
+function geminiError(last, apiKey, lockedUntil){
+  if(!last){
+    // Δεν έγινε καμία κλήση: όλα τα μοντέλα ήταν ήδη ανύπαρκτα ή κλειδωμένα από προηγούμενη ανάγνωση.
+    if(GEMINI_MODELS.every(m => gone.has(m))) return new Error('Κανένα μοντέλο της Google δεν είναι διαθέσιμο αυτή τη στιγμή (404). Δοκίμασε αργότερα.');
+    if(GEMINI_MODELS.some(m => (lockedUntil[m] ?? 0) > Date.now())) last = {status: 429, body: {}};
+    else return new Error('Η Google άργησε πολύ να απαντήσει. Δοκίμασε ξανά σε λίγο.');
+  }
+  if(last.kind === 'network') return new Error('Δεν υπάρχει σύνδεση στο internet.');
+  if(last.kind === 'timeout') return new Error('Η Google άργησε πολύ να απαντήσει. Δοκίμασε ξανά σε λίγο.');
+  if(last.kind === 'bad') return new Error('Η υπηρεσία ανάγνωσης απάντησε κάτι απρόσμενο. Δοκίμασε ξανά σε λίγο.');
+  const r = last, err = r.body?.error || {};
+  const reason = err.details?.find(d => d.reason)?.reason || err.status || '';
+  const google = err.message ? ` Η Google λέει: «${err.message}»` : '';
+  if(reason === 'API_KEY_INVALID'){
+    setKey('');
+    return new Error(`Η Google δεν αναγνωρίζει το key ${mask(apiKey)}. Φτιάξε/αντέγραψε νέο από το aistudio.google.com/apikey.`);
+  }
+  if(reason === 'SERVICE_DISABLED' || /has not been used|is disabled/i.test(err.message || ''))
+    return new Error('Το key είναι από project όπου δεν είναι ενεργό το Gemini API. Φτιάξε key από το aistudio.google.com/apikey.' + google);
+  if(reason === 'API_KEY_HTTP_REFERRER_BLOCKED' || reason === 'API_KEY_SERVICE_BLOCKED' || r.status === 403)
+    return new Error('Το key έχει περιορισμούς (sites/APIs) που μπλοκάρουν αυτή τη σελίδα. Βγάλε τους περιορισμούς ή φτιάξε νέο key.' + google);
+  if(r.status === 429){
+    const wait = Math.min(...GEMINI_MODELS.filter(m => !gone.has(m)).map(m => lockedUntil[m] ?? Infinity)) - Date.now();
+    const sec = Math.ceil(wait / 1000);
+    const when = Number.isFinite(wait) && wait > 0 ? `σε ${sec} ${sec === 1 ? 'δευτερόλεπτο' : 'δευτερόλεπτα'}` : 'σε λίγο';
+    return new Error(`Έφτασες το όριο της Google. Δοκίμασε ξανά ${when}.`);
+  }
+  if(r.status >= 500) return new Error('Οι servers της Google είναι φορτωμένοι αυτή τη στιγμή — δεν φταίει το key σου. Δοκίμασε ξανά σε λίγα λεπτά.');
+  if(/location is not supported/i.test(err.message || '')) return new Error('Η Google δεν δίνει το δωρεάν Gemini API σε αυτή τη χώρα.' + google);
+  return new Error(`Η ανάγνωση απέτυχε (${r.status}).` + google);
+}
+
+async function readWithClaude(base64, apiKey, onWarning){
   let Anthropic, api;
   try { ({Anthropic, api} = await client(apiKey)); }
   catch { throw new Error('Δεν φόρτωσε η υπηρεσία ανάγνωσης. Έλεγξε τη σύνδεση.'); }
@@ -147,11 +243,13 @@ async function readWithClaude(base64, apiKey){
       throw new Error(`Η Anthropic δεν δέχτηκε το key ${mask(apiKey)}. Βάλε το ξανά.`);
     }
     if(e instanceof Anthropic.RateLimitError) throw new Error('Πολλά αιτήματα μαζί. Δοκίμασε σε λίγο.');
+    if(e instanceof Anthropic.APIConnectionTimeoutError) throw new Error('Η υπηρεσία άργησε πολύ να απαντήσει. Δοκίμασε ξανά σε λίγο.');
     if(e instanceof Anthropic.APIConnectionError) throw new Error('Δεν υπάρχει σύνδεση στο internet.');
     if(e instanceof Anthropic.APIError) throw new Error(`Η ανάγνωση απέτυχε (${e.status ?? 'σφάλμα'}).`);
     throw new Error('Η ανάγνωση απέτυχε.');
   }
 
   if(res.stop_reason === 'refusal') throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί.');
-  return res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+  if(res.stop_reason === 'max_tokens') onWarning?.('Η ανάγνωση κόπηκε πριν τελειώσει — μπορεί να λείπουν υλικά από το τέλος της λίστας. Έλεγξε τη φωτογραφία.');
+  return (Array.isArray(res.content) ? res.content : []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
 }

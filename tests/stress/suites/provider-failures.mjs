@@ -1,6 +1,8 @@
 // Suite J/L/M/N: προσομοίωση αστοχιών του provider πάνω στον ΠΡΑΓΜΑΤΙΚΟ κώδικα (src/photo.js).
 // Δεν γίνεται καμία δικτυακή κλήση: το fetch αντικαθίσταται από ελεγχόμενο mock.
-import { readNotes } from '../../../src/photo.js';
+// Κάθε σενάριο = νέα συνεδρία της εφαρμογής: το photo.js θυμάται «κλειδωμένα» μοντέλα στη μνήμη του,
+// οπότε το φορτώνουμε ξανά (διαφορετικό URL → ξεχωριστό module) για να μην επηρεάζει το ένα σενάριο το άλλο.
+export const freshPhoto = tag => import(new URL(`../../../src/photo.js?session=${encodeURIComponent(tag)}`, import.meta.url));
 import { installClock } from '../lib/clock.mjs';
 import { mockProvider, ok, err } from '../lib/provider.mjs';
 
@@ -20,9 +22,11 @@ export const SCENARIOS = [
     expect: {success: false, bounded: true, backoff: true, message: /φορτωμένοι/}},
   {id: 'fail-04-500-always', desc: 'HTTP 500 συνέχεια', handler: busy(500), expect: {success: false, bounded: true, backoff: true, message: /φορτωμένοι/}},
   {id: 'fail-05-502-always', desc: 'HTTP 502 συνέχεια', handler: busy(502), expect: {success: false, bounded: true, backoff: true, message: /φορτωμένοι/}},
-  {id: 'fail-06-429-retry-after', desc: 'HTTP 429 με Retry-After: 30', handler: busy(429, {'retry-after': '30'}),
-    expect: {success: false, bounded: true, honorsRetryAfter: 30000, maxCalls: 3, message: /όριο/},
-    note: 'maxCalls 3: σε rate limit, 15 αιτήματα σε ~11s επιβαρύνουν το ίδιο όριο'},
+  {id: 'fail-06-429-retry-after', desc: 'HTTP 429 με Retry-After: 30 (όλα τα μοντέλα)', handler: busy(429, {'retry-after': '30'}),
+    expect: {success: false, bounded: true, honorsRetryAfter: 30000, maxCalls: 5, message: /όριο.*30 δευτερόλεπτα/},
+    note: 'Τα όρια της Google μετράνε ανά μοντέλο: επιτρέπεται ΜΙΑ κλήση σε κάθε μοντέλο, καμία δεύτερη στο ίδιο πριν περάσει το Retry-After'},
+  {id: 'fail-06b-429-short-retry-after', desc: 'HTTP 429 με Retry-After: 5, μετά OK', handler: c => c.n <= 5 ? busy(429, {'retry-after': '5'})() : ok(GOOD_TEXT),
+    expect: {success: true, honorsRetryAfter: 5000}},
   {id: 'fail-07-429-then-ok', desc: 'HTTP 429 μία φορά, μετά OK', handler: c => c.n === 1 ? busy(429)() : ok(GOOD_TEXT), expect: {success: true, retried: true}},
   {id: 'fail-08-network', desc: 'Network failure (fetch throws) συνέχεια', handler: () => ({networkError: true}),
     expect: {success: false, bounded: true, message: /internet/}},
@@ -62,9 +66,11 @@ export async function runScenario(s, {scale, timeout}){
   const mock = mockProvider(clock, s.handler);
   mock.install();
   const t0 = clock.now();
+  const {readNotes} = await freshPhoto(s.id);
   let outcome;
   try {
-    const run = readNotes(`${s.id}-payload`, {apiKey: KEY}).then(text => ({text}), e => ({error: e?.message ?? String(e)}));
+    const warnings = [];
+    const run = readNotes(`${s.id}-payload`, {apiKey: KEY, onWarning: w => warnings.push(w)}).then(text => ({text, warnings}), e => ({error: e?.message ?? String(e)}));
     const deadline = clock.sleep(timeout).then(() => ({deadline: true}));
     outcome = await Promise.race([run, deadline]);
   } finally {
@@ -82,13 +88,20 @@ export async function runScenario(s, {scale, timeout}){
   if(e.maxCalls) add(`≤ ${e.maxCalls} αιτήματα`, calls.length <= e.maxCalls, `${calls.length} αιτήματα`);
   if(e.bounded) add('πεπερασμένα retries (όχι infinite loop)', !outcome.deadline && calls.length <= BOUND, `${calls.length} αιτήματα`);
   if(e.backoff) add('backoff με αυξανόμενη αναμονή', waits.length >= 1 && waits.every((w, i) => i === 0 || w > waits[i - 1]), `αναμονές: ${waits.join(', ') || 'καμία'} ms`);
-  if(e.honorsRetryAfter) add(`τηρεί Retry-After (${e.honorsRetryAfter / 1000}s)`, waits.length > 0 && waits[0] >= e.honorsRetryAfter, `πρώτη αναμονή: ${waits[0] ?? 'καμία'} ms, δεύτερο αίτημα στα ${Math.round(calls[1]?.at ?? 0)} ms`);
+  if(e.honorsRetryAfter){
+    // Κανένα μοντέλο δεν ξανακαλείται πριν περάσει το Retry-After από το 429 του.
+    const early = [];
+    const byModel = {};
+    for(const c of calls){ const p = byModel[c.model]; if(p && p.status === 429 && c.at - p.at < e.honorsRetryAfter - 50) early.push(`${c.model} ξανά μετά από ${Math.round(c.at - p.at)} ms`); byModel[c.model] = c; }
+    add(`τηρεί Retry-After (${e.honorsRetryAfter / 1000}s ανά μοντέλο)`, early.length === 0, early.join(', ') || `κλήσεις: ${calls.map(c => `${c.model}@${Math.round(c.at)}ms`).join(', ')}`);
+  }
   if(e.noWaits) add('δεν περιμένει όταν δεν έχει νόημα', waits.length === 0, `αναμονές: ${waits.join(', ') || 'καμία'}`);
   if(e.message) add('κατανοητό μήνυμα στον χρήστη', !!outcome.error && e.message.test(outcome.error) && greekMessage(outcome.error), outcome.error);
   if(e.messageNot) add('σωστή αιτία στο μήνυμα', !!outcome.error && !e.messageNot.test(outcome.error) && greekMessage(outcome.error), outcome.error);
   if(e.clientTimeoutBy) add(`client timeout ≤ ${e.clientTimeoutBy / 1000}s`, !!outcome.error && elapsed <= e.clientTimeoutBy,
     outcome.deadline ? `καμία απάντηση/σφάλμα μετά από ${Math.round(elapsed / 1000)}s (όριο harness)` : `ολοκληρώθηκε στα ${Math.round(elapsed / 1000)}s ${outcome.text ? 'με επιτυχία (περίμενε όσο χρειάστηκε)' : ''}`);
-  if(e.notSilentTruncation) add('δεν δέχεται σιωπηλά κομμένη απάντηση', !outcome.text, outcome.text ? `επέστρεψε κομμένο: «${outcome.text.replace(/\n/g, ' / ')}»` : outcome.error);
+  if(e.notSilentTruncation) add('δεν δέχεται σιωπηλά κομμένη απάντηση', !outcome.text || outcome.warnings?.length > 0,
+    outcome.text ? (outcome.warnings?.length ? `επέστρεψε με προειδοποίηση: «${outcome.warnings[0]}»` : `επέστρεψε κομμένο χωρίς προειδοποίηση: «${outcome.text.replace(/\n/g, ' / ')}»`) : outcome.error);
 
   const pass = checks.every(c => c.pass);
   return {
