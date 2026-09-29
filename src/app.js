@@ -1,6 +1,7 @@
 import { parse } from './parse.js';
 import { createMic, micSupported } from './mic.js';
 import { readNotes, shrink, getKey, setKey } from './photo.js';
+import { makePdf, shareFile, download } from './share.js';
 
 const SAMPLE = 'Ανακαίνιση μπάνιου. Δώδεκα μέτρα σωλήνα πολυστρωματικό, μια μπαταρία νιπτήρα, λεκάνη κρεμαστή με καζανάκι εντοιχισμού, και δώδεκα τετραγωνικά πλακάκι τοίχου.';
 const BARS = 18;
@@ -294,21 +295,65 @@ function buildPdf(){
       <div class="g"><span>Σύνολο</span><span>${eur(s.total)}</span></div>
     </div>
     <p class="foot">Η προσφορά ισχύει για 15 ημέρες. Περιλαμβάνει υλικά και εργασία τοποθέτησης.</p>`;
-  cta('Στείλε στον πελάτη', openSheet);
+  preparePdf();
 }
 
 // ─── 5 : αποστολή ────────────────────────────────────────────
+// Το PDF φτιάχνεται μόλις ανοίξει η προεπισκόπηση, ώστε το «Στείλε» να ανοίγει αμέσως το μενού
+// κοινοποίησης (οι browsers το επιτρέπουν μόνο αμέσως μετά από πάτημα).
+let pdfFile = null;
+// Όνομα αρχείου με λατινικούς: κάποιοι browsers απορρίπτουν ελληνικά ονόματα στο κατέβασμα.
+const GR = {α:'a',β:'v',γ:'g',δ:'d',ε:'e',ζ:'z',η:'i',θ:'th',ι:'i',κ:'k',λ:'l',μ:'m',ν:'n',ξ:'x',ο:'o',π:'p',
+  ρ:'r',σ:'s',ς:'s',τ:'t',υ:'y',φ:'f',χ:'ch',ψ:'ps',ω:'o'};
+const greeklish = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/ου/g, 'ou').replace(/Ου/g, 'Ou').replace(/ΟΥ/g, 'OU')
+  .replace(/./g, c => { const l = c.toLowerCase(), t = GR[l]; return t ? (c === l ? t : t[0].toUpperCase() + t.slice(1)) : c; });
+const clientName = () => ($('client').value || 'Πελάτης').split(',')[0].trim();
+const shareText = () =>
+  `Καλησπέρα σας, σας στέλνω την προσφορά για ${TITLE}. Σύνολο ${eur(sums().total)} με ΦΠΑ.`;
+
+async function preparePdf(){
+  pdfFile = null;
+  cta('Ετοιμάζω το PDF…', null, true);
+  const name = `Prosfora-0142-${greeklish(clientName())}`.replace(/[^\w.-]+/g, '-').replace(/-+$/, '') + '.pdf';
+  try {
+    pdfFile = await makePdf($('pdf'), name);
+    cta('Στείλε στον πελάτη', sendPdf);
+  } catch (e) {
+    cta('Δοκίμασε ξανά', preparePdf, false, e.message || 'Δεν έγινε το PDF.');
+  }
+}
+
+async function sendPdf(){
+  const res = await shareFile(pdfFile, {title: `Προσφορά 0142 — ${clientName()}`, text: shareText()});
+  if(res === 'shared') done('Στάλθηκε', `Η προσφορά έφυγε για ${clientName()}.`);
+  else if(res === 'unsupported') openSheet();
+  // 'cancelled': ο χρήστης έκλεισε το μενού — μένουμε στην προεπισκόπηση
+}
+
 function openSheet(){ $('veil').classList.add('on'); $('sheet').classList.add('on'); }
 function closeSheet(){ $('veil').classList.remove('on'); $('sheet').classList.remove('on'); }
 $('veil').onclick = () => { closeSheet(); closeKey(); };
-document.querySelectorAll('.app').forEach(b=>b.onclick=()=>{
+document.querySelectorAll('[data-send]').forEach(b => b.onclick = () => {
   closeSheet();
-  const client = ($('client').value || 'Πελάτης').split(',')[0];
-  $('sentTo').textContent = `Η προσφορά έφυγε στον ${client} από το ${b.dataset.app} σου.`;
+  const how = b.dataset.send, text = encodeURIComponent(shareText());
+  download(pdfFile);
+  if(how === 'whatsapp') window.open(`https://wa.me/?text=${text}`, '_blank');
+  if(how === 'viber') location.href = `viber://forward?text=${text}`;
+  if(how === 'email') location.href = `mailto:?subject=${encodeURIComponent(pdfFile.name.replace(/\.pdf$/, ''))}&body=${text}`;
+  done('Το PDF κατέβηκε', how === 'download'
+    ? 'Βρίσκεται στις Λήψεις. Στείλε το στον πελάτη από όποια εφαρμογή θέλεις.'
+    : 'Επισύναψε το PDF από τις Λήψεις στο μήνυμα που άνοιξε.');
+});
+
+function done(title, text){
+  $('doneTitle').textContent = title;
+  $('sentTo').textContent = text;
   const secs = Math.max(1, Math.round((Date.now()-started)/1000));
   $('elapsed').textContent = secs < 60 ? `${secs} δευτ.` : `${Math.floor(secs/60)}′ ${secs%60}″`;
   $('checked').textContent = checkedCount;
   show('s-done','Έτοιμο');
   cta(null);
-});
+}
+$('resend').onclick = () => { if(pdfFile) sendPdf(); };
 $('again').onclick = ()=> location.reload();

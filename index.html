@@ -228,12 +228,13 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
     <section class="screen" id="s-done">
       <div class="done">
         <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
-        <h1>Στάλθηκε</h1>
+        <h1 id="doneTitle">Στάλθηκε</h1>
         <p class="lede" style="margin:0 auto" id="sentTo"></p>
       </div>
+      <div class="alt" style="margin-top:18px"><button class="ghost" id="resend">Στείλε το PDF ξανά</button></div>
       <div class="card">
-        <b>Θα σου θυμίσω σε 8 μέρες</b>
-        <p>Αν ο πελάτης δεν έχει απαντήσει μέχρι τότε, θα σου το πω. Εσύ αποφασίζεις αν θα τον πάρεις.</p>
+        <b>Σύντομα: υπενθύμιση σε 8 μέρες</b>
+        <p>Θα σου λέμε αν ο πελάτης δεν έχει απαντήσει. Δεν λειτουργεί ακόμα.</p>
       </div>
       <div class="card">
         <div class="stat"><span>Χρόνος προσφοράς</span><b class="num" id="elapsed"></b></div>
@@ -254,11 +255,12 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 <div class="sheet-veil" id="veil"></div>
 <div class="sheet" id="sheet" role="dialog" aria-label="Αποστολή">
   <h3>Αποστολή PDF στον πελάτη</h3>
+  <p>Αυτός ο browser δεν στέλνει αρχεία απευθείας. Κατέβασε το PDF και επισύναψέ το στο μήνυμα.</p>
   <div class="apps">
-    <button class="app" data-app="Viber"><i style="background:#7360F2">V</i>Viber</button>
-    <button class="app" data-app="WhatsApp"><i style="background:#25A35A">W</i>WhatsApp</button>
-    <button class="app" data-app="email"><i style="background:#4A5A70">@</i>Email</button>
-    <button class="app" data-app="SMS"><i style="background:#2A8BD6">✉</i>Μήνυμα</button>
+    <button class="app" data-send="download"><i style="background:#1A1D21">⬇</i>Κατέβασμα PDF</button>
+    <button class="app" data-send="whatsapp"><i style="background:#25A35A">W</i>WhatsApp</button>
+    <button class="app" data-send="viber"><i style="background:#7360F2">V</i>Viber</button>
+    <button class="app" data-send="email"><i style="background:#4A5A70">@</i>Email</button>
   </div>
 </div>
 
