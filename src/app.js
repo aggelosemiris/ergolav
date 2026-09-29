@@ -1,7 +1,8 @@
 import { parse, glueSacks } from './parse.js';
 import { createMic, micSupported } from './mic.js';
-import { readNotes, shrink, getKey, setKey } from './photo.js';
+import { readNotes, shrink, getKey, setKey, forgetKey, canRememberKey, isKeyRemembered, keyProvider } from './photo.js';
 import { makePdf, shareFile, download } from './share.js';
+import { parseAmount, toCents, formatEur, formatQty } from './number.js';
 
 const SAMPLE = 'Ανακαίνιση μπάνιου. Δώδεκα μέτρα σωλήνα πολυστρωματικό, μια μπαταρία νιπτήρα, λεκάνη κρεμαστή με καζανάκι εντοιχισμού, και δώδεκα τετραγωνικά πλακάκι τοίχου.';
 const BARS = 18;
@@ -126,14 +127,56 @@ $('photoInput').onchange = async e => {
   e.target.value = '';
   if(!file) return;
   started = Date.now();
+  let img;
   try {
-    pendingPhoto = await shrink(file);
+    img = await shrink(file);
   } catch {
     review('', 'Δεν μπόρεσα να ανοίξω τη φωτογραφία.');
     return;
   }
-  readPhoto(pendingPhoto);
+  openRedact(img);
 };
+
+// ─── Πριν σταλεί: κάλυψη προσωπικών στοιχείων πάνω στη φωτογραφία ──
+// Ό,τι καλυφθεί γίνεται μαύρο ΠΑΝΩ στην εικόνα που στέλνεται (δεν στέλνεται το πρωτότυπο).
+const rc = $('redactCanvas'), rctx = rc.getContext('2d');
+let rImg = null, rects = [], drag = null;
+function drawRedact(){
+  if(!rImg) return;
+  rctx.drawImage(rImg, 0, 0, rc.width, rc.height);
+  rctx.fillStyle = '#000';
+  for(const r of drag ? [...rects, drag] : rects) rctx.fillRect(r.x, r.y, r.w, r.h);
+}
+const rPoint = e => { const b = rc.getBoundingClientRect(); return {x: (e.clientX - b.left) * rc.width / b.width, y: (e.clientY - b.top) * rc.height / b.height}; };
+rc.addEventListener('pointerdown', e => { rc.setPointerCapture(e.pointerId); const p = rPoint(e); drag = {x0: p.x, y0: p.y, x: p.x, y: p.y, w: 0, h: 0}; });
+rc.addEventListener('pointermove', e => {
+  if(!drag) return;
+  const p = rPoint(e);
+  Object.assign(drag, {x: Math.min(drag.x0, p.x), y: Math.min(drag.y0, p.y), w: Math.abs(p.x - drag.x0), h: Math.abs(p.y - drag.y0)});
+  drawRedact();
+});
+const endDrag = () => { if(drag && drag.w > 6 && drag.h > 6) rects.push({x: drag.x, y: drag.y, w: drag.w, h: drag.h}); drag = null; drawRedact(); };
+rc.addEventListener('pointerup', endDrag);
+rc.addEventListener('pointercancel', endDrag);
+$('redactUndo').onclick = () => { rects.pop(); drawRedact(); };
+$('redactCancel').onclick = () => { rImg = null; show('s-start', 'Νέα προσφορά'); cta(null); };
+
+async function openRedact(img){
+  rImg = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = img.url; });
+  rc.width = rImg.width; rc.height = rImg.height; rects = []; drag = null;
+  drawRedact();
+  const prov = keyProvider(getKey());
+  $('privacyNote').textContent = prov === 'anthropic'
+    ? 'Θα σταλεί στην Anthropic (Claude) για ανάγνωση. Η Anthropic δεν χρησιμοποιεί τα δεδομένα του API για εκπαίδευση μοντέλων.'
+    : 'Θα σταλεί στη Google (Gemini) για ανάγνωση. Στο δωρεάν επίπεδο η Google μπορεί να τη χρησιμοποιήσει για βελτίωση των υπηρεσιών της και να τη δουν άνθρωποι — κάλυψε ό,τι προσωπικό.';
+  show('s-redact', 'Απόρρητο');
+  cta('Στείλε για ανάγνωση', () => {
+    const url = rc.toDataURL('image/jpeg', 0.85);
+    pendingPhoto = {url, data: url.split(',')[1]};
+    rImg = null;
+    readPhoto(pendingPhoto);
+  });
+}
 
 async function readPhoto(img){
   show('s-listen','Διαβάζω');
@@ -161,25 +204,69 @@ async function readPhoto(img){
 }
 
 $('changeKey').onclick = () => openKey();
+// Πάντα διαθέσιμη πρόσβαση στο key (αλλαγή/διαγραφή), ακόμα κι όταν η φωτογραφία ανοίγει κατευθείαν την κάμερα.
+const syncKeyUi = () => { $('keySettings').hidden = !getKey(); };
+$('keySettings').onclick = () => openKey();
+syncKeyUi();
 
 function openKey(msg){
   $('keyError').hidden = !msg; $('keyError').textContent = msg || '';
   $('keyInput').value = '';
+  $('keyInput').type = 'password'; $('keyShow').textContent = 'Εμφάνιση'; $('keyShow').setAttribute('aria-pressed', 'false');
+  const can = canRememberKey();
+  $('keyRemember').checked = can && isKeyRemembered();
+  $('keyRemember').disabled = !can;
+  $('rememberNote').textContent = can
+    ? 'Αν το τσεκάρεις, μένει σε αυτό το κινητό μέχρι να πατήσεις «Ξέχασε το key». Όποιος έχει το κινητό μπορεί να το χρησιμοποιήσει. Αλλιώς ξεχνιέται όταν κλείσει η σελίδα.'
+    : 'Σε αυτή τη διεύθυνση δοκιμών το key δεν αποθηκεύεται ποτέ (το domain το μοιράζονται και άλλες σελίδες). Ξεχνιέται όταν κλείσει η σελίδα.';
+  $('keyForget').hidden = !getKey();
   $('veil').classList.add('on'); $('keySheet').classList.add('on');
   setTimeout(() => $('keyInput').focus(), 250);
 }
 function closeKey(){ $('veil').classList.remove('on'); $('keySheet').classList.remove('on'); }
 $('keyCancel').onclick = closeKey;
+$('keyShow').onclick = () => {
+  const show = $('keyInput').type === 'password';
+  $('keyInput').type = show ? 'text' : 'password';
+  $('keyShow').textContent = show ? 'Απόκρυψη' : 'Εμφάνιση';
+  $('keyShow').setAttribute('aria-pressed', String(show));
+};
+$('keyForget').onclick = () => { forgetKey(); pendingPhoto = null; closeKey(); syncKeyUi(); $('micNote').textContent = 'Το key σβήστηκε από αυτή τη συσκευή.'; };
 $('keySave').onclick = () => {
   const k = $('keyInput').value.trim();
   if(!k) return;
-  setKey(k); closeKey();
+  setKey(k, {remember: $('keyRemember').checked}); closeKey(); syncKeyUi();
   // Αν μια φωτογραφία περίμενε το κλειδί, τη διαβάζουμε τώρα· αλλιώς ανοίγει η κάμερα.
   if(pendingPhoto) readPhoto(pendingPhoto);
   else $('photoInput').click();
 };
 
 // ─── 3 : γραμμές ─────────────────────────────────────────────
+// Πεδίο αριθμού με ζωντανή επιβεβαίωση: κάτω από το πεδίο φαίνεται πώς διαβάστηκε ο αριθμός
+// («= 1.234,50 €») ή γιατί δεν διαβάζεται. Επιστρέφει συνάρτηση που δίνει {value} ή {error}.
+function numField(el, key, {optional = false, ...opts}, fmt){
+  const input = el.querySelector(`[data-p="${key}"]`), out = el.querySelector(`[data-o="${key}"]`);
+  const read = () => {
+    const raw = input.value.trim();
+    if(!raw && optional) return {value: 0, empty: true};
+    return parseAmount(raw, opts);
+  };
+  const show = (force) => {
+    const r = read();
+    const quiet = !force && !input.value.trim();
+    out.textContent = quiet || r.empty ? '' : r.error ? r.error : `= ${fmt(r.value)}`;
+    out.classList.toggle('err', !quiet && !!r.error);
+  };
+  input.addEventListener('input', () => show());
+  show();
+  return () => { const r = read(); show(true); if(r.error) input.focus(); return r; };
+}
+function showFieldError(el, key, msg){
+  const out = el.querySelector(`[data-o="${key}"]`);
+  out.textContent = msg; out.classList.add('err');
+  el.querySelector(`[data-p="${key}"]`).focus();
+}
+
 function lineTotal(l){ return Math.round(l.qty*(l.mat+l.lab)); }
 const needsQty = l => l.qtyMissing || l.qtyCheck;
 function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l)).length; }
@@ -210,14 +297,18 @@ function renderLines(){
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
         <div class="ask">Δεν είναι στον κατάλογο. Βάλε τιμή ανά ${per}:</div>
         <div class="prices">
-          <label>Υλικό €<input inputmode="decimal" data-p="mat" placeholder="0,00"></label>
-          <label>Εργασία €<input inputmode="decimal" data-p="lab" placeholder="0,00"></label>
+          <label>Υλικό €<input inputmode="decimal" data-p="mat" placeholder="0,00"><small class="parsed" data-o="mat"></small></label>
+          <label>Εργασία €<input inputmode="decimal" data-p="lab" placeholder="0,00"><small class="parsed" data-o="lab"></small></label>
         </div>
         <div class="sug-act"><button data-a="add">Πρόσθεσέ το</button><button data-a="drop">Βγάλ' το</button></div>`;
-      const cents = k => Math.round(parseFloat((el.querySelector(`[data-p="${k}"]`).value || '0').replace(/\s/g,'').replace(',', '.')) * 100) || 0;
+      // Τιμές με αυστηρή ανάγνωση: «1.234,50» = 1.234,50 € · αμφίσημο/άκυρο → μήνυμα, ποτέ σιωπηλή τιμή.
+      const readMat = numField(el, 'mat', {optional: true, allowZero: true}, formatEur);
+      const readLab = numField(el, 'lab', {optional: true, allowZero: true}, formatEur);
       el.querySelector('[data-a="add"]').onclick=()=>{
-        const mat = cents('mat'), lab = cents('lab');
-        if(mat <= 0 && lab <= 0){ el.querySelector('[data-p="mat"]').focus(); return; }
+        const m = readMat(), b = readLab();
+        if(m.error || b.error) return;
+        const mat = toCents(m.value), lab = toCents(b.value);
+        if(mat <= 0 && lab <= 0){ showFieldError(el, 'mat', 'Βάλε τιμή υλικού ή εργασίας.'); return; }
         Object.assign(l, {mat, lab, unknown:false, unit: l.unit || 'τεμ.', code:'Εκτός καταλόγου'});
         checkedCount++; renderLines();
       };
@@ -246,11 +337,13 @@ function renderLines(){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${esc(l.name)}</span></div>
         <div class="ask">${l.qtyMissing ? `Δεν είπες ποσότητα (${esc(l.unit)}) — γράψε πόσα:` : `${fmtQty(l.qty)} ${esc(l.unit)}; Φαίνεται πολύ — έλεγξε την ποσότητα:`}</div>
-        <div class="prices"><label>Ποσότητα (${esc(l.unit)})<input inputmode="decimal" data-p="qty" value="${l.qtyMissing ? '' : fmtQty(l.qty)}" placeholder="0"></label></div>
+        <div class="prices"><label>Ποσότητα (${esc(l.unit)})<input inputmode="decimal" data-p="qty" value="${l.qtyMissing ? '' : String(l.qty).replace('.', ',')}" placeholder="0"><small class="parsed" data-o="qty"></small></label></div>
         <div class="sug-act"><button data-a="ok">Εντάξει</button><button data-a="drop">Βγάλ' το</button></div>`;
+      const readQty = numField(el, 'qty', {maxDecimals: 3}, v => `${formatQty(v)} ${l.unit}`);
       el.querySelector('[data-a="ok"]').onclick=()=>{
-        const q = parseFloat((el.querySelector('[data-p="qty"]').value || '').replace(/\s/g,'').replace(',', '.'));
-        if(!(q > 0)){ el.querySelector('[data-p="qty"]').focus(); return; }
+        const r = readQty();
+        if(r.error) return;
+        const q = r.value;
         Object.assign(l, {qty: q, qtyMissing: false, qtyCheck: false});
         checkedCount++; renderLines();
       };
@@ -275,11 +368,21 @@ function renderLines(){
   cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0,
       left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : '');
 }
+// ΦΠΑ: επιλέγεται ανά προσφορά (προτίμηση συσκευής). Μειωμένοι συντελεστές νησιών: −30% (24→17, 13→9, 6→4)
+// σε Λέρο, Λέσβο, Κω, Σάμο, Χίο και, από 1/1/2026, σε νησιά Β. Αιγαίου/Δωδεκανήσου έως 20.000 κατοίκους.
+// Ο σωστός συντελεστής εξαρτάται από τόπο και είδος εργασίας — τον επιβεβαιώνει ο λογιστής.
+const VAT_RATES = [
+  [24, '24% — κανονικός'], [17, '17% — μειωμένος νησιών'], [13, '13% — μειωμένος'], [9, '9% — μειωμένος νησιών'],
+  [6, '6% — υπερμειωμένος'], [4, '4% — υπερμειωμένος νησιών'], [0, '0% — απαλλαγή'],
+];
+let vatRate = (() => { try { const v = Number(localStorage.getItem('ergolav.vat')); return VAT_RATES.some(([r]) => r === v) && localStorage.getItem('ergolav.vat') !== null ? v : 24; } catch { return 24; } })();
+function setVat(v){ vatRate = v; try { localStorage.setItem('ergolav.vat', String(v)); } catch {} }
+
 function sums(){
   const ok = LINES.filter(l=>!l.flag && !l.suggest && !l.unknown && !needsQty(l));
   const mat = ok.reduce((s,l)=>s+Math.round(l.qty*l.mat),0);
   const lab = ok.reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
-  const net = mat+lab, vat = Math.round(net*0.24);
+  const net = mat+lab, vat = Math.round(net * vatRate / 100);
   return {mat,lab,net,vat,total:net+vat};
 }
 function renderTotals(){
@@ -287,8 +390,12 @@ function renderTotals(){
   $('totals').innerHTML = `
     <div class="t"><span>Υλικά</span><span class="num">${eur(s.mat)}</span></div>
     <div class="t"><span>Εργασία</span><span class="num">${eur(s.lab)}</span></div>
-    <div class="t"><span>ΦΠΑ 24%</span><span class="num">${eur(s.vat)}</span></div>
-    <div class="t big"><span>Σύνολο</span><span class="num">${eur(s.total)}</span></div>`;
+    <div class="t"><span>ΦΠΑ ${vatRate}%</span><span class="num">${eur(s.vat)}</span></div>
+    <div class="t big"><span>Σύνολο</span><span class="num">${eur(s.total)}</span></div>
+    <label class="vat">Συντελεστής ΦΠΑ
+      <select id="vatRate">${VAT_RATES.map(([r, t]) => `<option value="${r}"${r === vatRate ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+    <p class="privacy">Ο σωστός συντελεστής εξαρτάται από το νησί/περιοχή και το είδος της εργασίας — επιβεβαίωσέ τον με τον λογιστή σου.</p>`;
+  $('vatRate').onchange = e => { setVat(Number(e.target.value)); renderTotals(); };
 }
 
 // ─── 4 : PDF ─────────────────────────────────────────────────
@@ -311,7 +418,7 @@ function buildPdf(){
     </table>
     <div class="sum num">
       <div><span>Καθαρή αξία</span><span>${eur(s.net)}</span></div>
-      <div><span>ΦΠΑ 24%</span><span>${eur(s.vat)}</span></div>
+      <div><span>ΦΠΑ ${vatRate}%</span><span>${eur(s.vat)}</span></div>
       <div class="g"><span>Σύνολο</span><span>${eur(s.total)}</span></div>
     </div>
     <p class="foot">Η προσφορά ισχύει για 15 ημέρες. Περιλαμβάνει υλικά και εργασία τοποθέτησης.</p>`;

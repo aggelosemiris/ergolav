@@ -1,7 +1,8 @@
 // Φωτογραφία σημειώσεων → κείμενο (Google Gemini ή Claude, ανάλογα με το key). Το key μένει μόνο σε αυτή τη συσκευή.
 
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.129.0/+esm';
-const KEY_STORE = 'ergolav.anthropicKey';
+// SDK από τον ίδιο τον server της εφαρμογής (όχι από CDN τρίτου): vendor/, MIT, έκδοση κλειδωμένη.
+const SDK_URL = new URL('../vendor/anthropic-sdk-0.129.0.mjs', import.meta.url).href;
+const KEY_STORE = 'ergolav.apiKey', OLD_KEY_STORE = 'ergolav.anthropicKey';
 
 const PROMPT = `Αυτή είναι φωτογραφία με σημειώσεις τεχνίτη (υδραυλικός / ανακαινίσεις) για τα υλικά μιας δουλειάς — συχνά χειρόγραφες, στα ελληνικά.
 
@@ -19,14 +20,37 @@ const PROMPT = `Αυτή είναι φωτογραφία με σημειώσει
 
 Απάντησε μόνο με τις γραμμές, χωρίς τίποτα άλλο.`;
 
-export const getKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
+// ── Αποθήκευση key ──
+// Εξ ορισμού το key μένει ΜΟΝΟ στη μνήμη της σελίδας (χάνεται με το κλείσιμο). Στο localStorage μπαίνει
+// μόνο αν ο χρήστης το ζητήσει ρητά — και ποτέ σε κοινόχρηστο domain (π.χ. raw.githack.com), όπου
+// οποιαδήποτε άλλη σελίδα του ίδιου domain θα μπορούσε να το διαβάσει.
+const SHARED_HOSTS = /(^|\.)(raw\.githack\.com|rawcdn\.githack\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|htmlpreview\.github\.io)$/;
+export const canRememberKey = () => { try { return !SHARED_HOSTS.test(location.hostname); } catch { return false; } };
+let memKey = '';
+const store = {
+  get(k){ try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set(k, v){ try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} },
+};
+// Παλιές εκδόσεις αποθήκευαν πάντα το key: σε κοινόχρηστο domain το σβήνουμε αμέσως.
+if(store.get(OLD_KEY_STORE)){
+  if(canRememberKey() && !store.get(KEY_STORE)) store.set(KEY_STORE, store.get(OLD_KEY_STORE));
+  store.set(OLD_KEY_STORE, '');
+}
+if(!canRememberKey()) store.set(KEY_STORE, '');
+
+export const getKey = () => memKey || (canRememberKey() ? store.get(KEY_STORE) : '');
+export const isKeyRemembered = () => canRememberKey() && !!store.get(KEY_STORE);
 // Η επικόλληση στο κινητό φέρνει συχνά κενά, αλλαγές γραμμής ή αόρατους χαρακτήρες.
-export const cleanKey = k => (k || '').replace(/[\s​-‍⁠﻿"'«»]/g, '');
-export const setKey = k => {
+export const cleanKey = k => (k || '').replace(/[\s\u200B-\u200D\u2060\uFEFF"'«»]/g, '');
+export const setKey = (k, {remember = isKeyRemembered()} = {}) => {
   k = cleanKey(k);
   // Αν επικολλήθηκε μαζί με άλλο κείμενο (π.χ. «API key: AIza…»), κρατάμε μόνο το κλειδί.
   k = (k.match(/AIza[0-9A-Za-z_-]{35}/) || k.match(/sk-ant-[0-9A-Za-z_-]+/) || [k])[0];
-  try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} };
+  memKey = k;
+  store.set(KEY_STORE, k && remember && canRememberKey() ? k : '');
+};
+export const forgetKey = () => { memKey = ''; store.set(KEY_STORE, ''); store.set(OLD_KEY_STORE, ''); };
+export const keyProvider = k => !k ? '' : k.startsWith('sk-ant-') ? 'anthropic' : 'google';
 
 /** Μικραίνει τη φωτογραφία (μεγάλη πλευρά ≤ 1568px) και τη δίνει ως base64 JPEG. */
 export async function shrink(file){
@@ -219,6 +243,9 @@ function geminiError(last, apiKey, lockedUntil){
   return new Error(`Η ανάγνωση απέτυχε (${r.status}).` + google);
 }
 
+// Μεταγραφή σημειώσεων: Sonnet 5.5 (~μισό κόστος από Opus 5.5). Όχι Haiku 4.5: δεν δέχεται «effort»
+// και διαβάζει χειρόγραφα λιγότερο καλά. Παράμετροι ελεγμένες με type-check στο SDK 0.129.0.
+const CLAUDE_MODEL = 'claude-sonnet-5-5';
 async function readWithClaude(base64, apiKey, onWarning){
   let Anthropic, api;
   try { ({Anthropic, api} = await client(apiKey)); }
@@ -227,7 +254,7 @@ async function readWithClaude(base64, apiKey, onWarning){
   let res;
   try {
     res = await api.beta.messages.create({
-      model: 'claude-opus-5-5',
+      model: CLAUDE_MODEL,
       max_tokens: 4000,
       output_config: {effort: 'low'},
       betas: ['server-side-fallback-2026-07-01'],
