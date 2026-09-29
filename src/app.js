@@ -1,5 +1,6 @@
 import { parse } from './parse.js';
 import { createMic, micSupported } from './mic.js';
+import { readNotes, shrink, getKey, setKey } from './photo.js';
 
 const SAMPLE = 'Ανακαίνιση μπάνιου. Δώδεκα μέτρα σωλήνα πολυστρωματικό, μια μπαταρία νιπτήρα, λεκάνη κρεμαστή με καζανάκι εντοιχισμού, και δώδεκα τετραγωνικά πλακάκι τοίχου.';
 const BARS = 18;
@@ -63,6 +64,7 @@ async function startListening(initial = ''){
   }
   show('s-listen','Ακούω');
   notice('');
+  $('shot').hidden = true;
   wave.hidden = false; wave.classList.remove('live');
   [...wave.children].forEach(b => b.style.height = '');
   $('listenAlt').hidden = true;
@@ -112,20 +114,62 @@ $('resume').onclick = () => startListening(transcript.textContent.trim());
 $('sample').onclick = () => { transcript.textContent = SAMPLE; transcript.oninput(); };
 if(!micSupported) $('micNote').textContent = 'Ο browser σου δεν έχει αναγνώριση φωνής — θα μπορείς να το γράψεις.';
 
-// Φωτογραφία σημειώσεων: ακόμα προσομοίωση.
-$('photo').onclick = () => {
+// ─── Φωτογραφία σημειώσεων → κατευθείαν στην προσφορά ──────
+const shot = $('shot');
+let pendingPhoto = null;
+
+$('photo').onclick = () => getKey() ? $('photoInput').click() : openKey();
+$('photoInput').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
   started = Date.now();
+  try {
+    pendingPhoto = await shrink(file);
+  } catch {
+    review('', 'Δεν μπόρεσα να ανοίξω τη φωτογραφία.');
+    return;
+  }
+  readPhoto(pendingPhoto);
+};
+
+async function readPhoto(img){
   show('s-listen','Διαβάζω');
-  notice(''); wave.hidden = true; $('listenAlt').hidden = true; cta(null);
-  $('listenLabel').textContent = 'Διαβάζω τις σημειώσεις… (δείγμα)';
+  notice(''); wave.hidden = true; $('listenAlt').hidden = true; $('chips').replaceChildren();
+  shot.src = img.url; shot.hidden = false; shot.classList.add('reading');
   transcript.contentEditable = 'false';
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let k = 0;
-  const tick = setInterval(()=>{
-    k += reduce ? SAMPLE.length : 2;
-    transcript.innerHTML = esc(SAMPLE.slice(0,k)) + '<span class="caret"></span>';
-    if(k >= SAMPLE.length){ clearInterval(tick); review(SAMPLE); }
-  }, 38);
+  transcript.innerHTML = '<span class="caret"></span>';
+  cta('Διαβάζω…', null, true);
+  $('listenLabel').textContent = 'Διαβάζω τις σημειώσεις σου…';
+  try {
+    const text = await readNotes(img.data);
+    pendingPhoto = null;
+    shot.classList.remove('reading');
+    review(text);
+    buildLines(text);
+  } catch (err) {
+    shot.classList.remove('reading');
+    // Χωρίς (σωστό) κλειδί: ζητάμε κλειδί και κρατάμε τη φωτογραφία για μετά.
+    if(!getKey()){ openKey(); review('', err.message === 'NO_KEY' ? '' : err.message); return; }
+    pendingPhoto = null;
+    review('', err.message + ' Μπορείς να γράψεις τι λένε οι σημειώσεις.');
+  }
+}
+
+function openKey(){
+  $('keyInput').value = '';
+  $('veil').classList.add('on'); $('keySheet').classList.add('on');
+  setTimeout(() => $('keyInput').focus(), 250);
+}
+function closeKey(){ $('veil').classList.remove('on'); $('keySheet').classList.remove('on'); }
+$('keyCancel').onclick = closeKey;
+$('keySave').onclick = () => {
+  const k = $('keyInput').value.trim();
+  if(!k) return;
+  setKey(k); closeKey();
+  // Αν μια φωτογραφία περίμενε το κλειδί, τη διαβάζουμε τώρα· αλλιώς ανοίγει η κάμερα.
+  if(pendingPhoto) readPhoto(pendingPhoto);
+  else $('photoInput').click();
 };
 
 // ─── 3 : γραμμές ─────────────────────────────────────────────
@@ -239,7 +283,7 @@ function buildPdf(){
 // ─── 5 : αποστολή ────────────────────────────────────────────
 function openSheet(){ $('veil').classList.add('on'); $('sheet').classList.add('on'); }
 function closeSheet(){ $('veil').classList.remove('on'); $('sheet').classList.remove('on'); }
-$('veil').onclick = closeSheet;
+$('veil').onclick = () => { closeSheet(); closeKey(); };
 document.querySelectorAll('.app').forEach(b=>b.onclick=()=>{
   closeSheet();
   const client = ($('client').value || 'Πελάτης').split(',')[0];

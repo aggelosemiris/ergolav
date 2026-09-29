@@ -43,7 +43,11 @@ function makeLine(item, qty, tokens){
   return line;
 }
 
+// Συντομογραφίες σημειώσεων («12 μ.», «τ.μ.», «τεμ.») — η τελεία τους δεν κλείνει φράση.
+const ABBR = /(^|[\s\d])(τ\.\s?μ|τμ|μ|τεμ|τεμαχ|μετ|κιλ|λιτ|σακ|κουτ)\./gi;
+
 export function parse(text){
+  text = text.replace(ABBR, (_, pre, ab) => pre + ab.replace(/[.\s]/g, '') + ' ');
   const lines = [], unknown = [];
   let title = '';
   for(const raw of text.split(SPLIT)){

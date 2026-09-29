@@ -53,3 +53,12 @@ test('ό,τι δεν αναγνωρίζεται βγαίνει για έλεγχ
   assert.equal(r.lines.length, 1);
   assert.equal(r.lines[0].unknown, true);
 });
+
+test('σημειώσεις με συντομογραφίες και μία γραμμή ανά υλικό', () => {
+  const r = parse('12 μ. σωλήνας\n2 τεμ. διακόπτες\n15 τ.μ. πλακάκι δαπέδου γκρι\nλεκάνη κρεμαστή');
+  assert.equal(byId(r, 'pipe')[0].qty, 12);
+  assert.equal(byId(r, 'valve')[0].qty, 2);
+  assert.equal(byId(r, 'tile')[0].qty, 15);
+  assert.equal(byId(r, 'wc')[0].qty, 1);
+  assert.equal(r.lines.filter(l => l.unknown).length, 0);
+});

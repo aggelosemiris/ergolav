@@ -86,6 +86,15 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 .chip.q{background:var(--warn-soft);color:var(--warn)}
 [hidden]{display:none!important}
 .row-alt{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+.shot{display:block;width:100%;max-height:260px;object-fit:contain;border-radius:14px;background:var(--paper);border:1px solid var(--line);margin:8px 0 12px}
+.shot.reading{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.shot.reading{animation:none}}
+.sheet p{color:var(--dim);font-size:14px;margin-bottom:12px}
+.sheet a{color:var(--pen)}
+.sheet .field{margin-top:0}
+.sheet-btns{display:flex;gap:8px;margin-top:14px}
+.sheet-btns button{flex:1}
 
 .lines{margin-top:14px;display:flex;flex-direction:column;gap:10px}
 .ln{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 16px;animation:in .25s ease-out both}
@@ -176,12 +185,14 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
         <div class="mic-hint">Πάτα και μίλα</div>
         <div class="mic-note" id="micNote">π.χ. «δώδεκα μέτρα σωλήνα, μια λεκάνη κρεμαστή και δέκα τετραγωνικά πλακάκι λευκό»</div>
       </div>
-      <div class="alt"><button class="ghost" id="photo">Ή φωτογράφισε τις σημειώσεις σου</button></div>
+      <div class="alt"><button class="ghost" id="photo">📷 Ή φωτογράφισε τις σημειώσεις σου</button></div>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
     </section>
 
     <!-- 2 LISTEN -->
     <section class="screen" id="s-listen">
       <div class="wave" id="wave" aria-hidden="true"></div>
+      <img class="shot" id="shot" alt="Η φωτογραφία των σημειώσεων" hidden>
       <p class="listening" id="listenLabel">Ακούω…</p>
       <div class="notice" id="notice" role="alert" hidden></div>
       <div class="transcript" id="transcript" aria-live="polite" spellcheck="false"
@@ -246,6 +257,19 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
   </div>
 </div>
 
-<script type="module" src="src/app.js"></script>
+<div class="sheet" id="keySheet" role="dialog" aria-label="Κλειδί ανάγνωσης">
+  <h3>Μία φορά: κλειδί για ανάγνωση φωτογραφιών</h3>
+  <p>Τις σημειώσεις τις διαβάζει το Claude. Βάλε ένα API key από το
+    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+    Μένει μόνο σε αυτό το κινητό.</p>
+  <div class="field"><label for="keyInput">API key</label>
+    <input id="keyInput" type="password" autocomplete="off" placeholder="sk-ant-…"></div>
+  <div class="sheet-btns">
+    <button class="ghost" id="keyCancel">Άκυρο</button>
+    <button class="primary" id="keySave">Αποθήκευση</button>
+  </div>
+</div>
+
+<script type="module"src="src/app.js"></script>
 </body>
 </html>
