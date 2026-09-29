@@ -27,8 +27,21 @@ function withGps(jpeg){
   const app1 = Buffer.concat([Buffer.from([0xFF, 0xE1]), Buffer.from([(payload.length + 2) >> 8, (payload.length + 2) & 255]), payload]);
   return Buffer.concat([jpeg.subarray(0, 2), app1, jpeg.subarray(2)]);                                          // αμέσως μετά το SOI
 }
-const hasExif = buf => buf.includes(Buffer.from('Exif\0\0', 'binary'));
-const hasGpsIfd = buf => buf.includes(Buffer.from([0x88, 0x25]));
+// Μεταδεδομένα ψάχνονται ΜΟΝΟ στα segments πριν από τα δεδομένα εικόνας (SOS). Μέσα στα συμπιεσμένα
+// δεδομένα το ζεύγος 0x88 0x25 εμφανίζεται τυχαία (~1 στις 20 εκτελέσεις) — ήταν ψευδής συναγερμός.
+function headerSegments(buf){
+  const segs = []; let i = 2;
+  while(i + 4 <= buf.length && buf[i] === 0xFF){
+    const marker = buf[i + 1], len = buf.readUInt16BE(i + 2);
+    segs.push({marker, data: buf.subarray(i + 4, i + 2 + len)});
+    if(marker === 0xDA) break;              // SOS: από εδώ και πέρα μόνο εικόνα
+    i += 2 + len;
+  }
+  return segs;
+}
+const app1 = buf => headerSegments(buf).filter(s => s.marker === 0xE1);
+const hasExif = buf => app1(buf).some(s => s.data.subarray(0, 6).equals(Buffer.from('Exif\0\0', 'binary')));
+const hasGpsIfd = buf => app1(buf).some(s => s.data.includes(Buffer.from([0x88, 0x25])));
 
 const src = withGps(fs.readFileSync(new URL('../stress/fixtures/01-normal.jpg', import.meta.url)));
 const tmp = new URL('./.gps-test.jpg', import.meta.url);
@@ -63,9 +76,12 @@ await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on', {timeout: 20000});
 
 const bytes = Buffer.from(sent, 'base64');
+if(process.env.PRIVACY_DUMP) fs.writeFileSync(process.env.PRIVACY_DUMP, bytes);
 check('στάλθηκε JPEG', bytes[0] === 0xFF && bytes[1] === 0xD8);
 check('τα bytes που στάλθηκαν ΔΕΝ έχουν EXIF', !hasExif(bytes));
 check('τα bytes που στάλθηκαν ΔΕΝ έχουν GPS IFD', !hasGpsIfd(bytes));
+check('τα bytes που στάλθηκαν δεν έχουν κανένα APP1 segment (EXIF/XMP)', app1(bytes).length === 0,
+  headerSegments(bytes).map(s => '0x' + s.marker.toString(16)).join(' '));
 // Αποκωδικοποίηση ΤΩΝ BYTES ΠΟΥ ΣΤΑΛΘΗΚΑΝ και δειγματοληψία pixels.
 const px = await p.evaluate(async ({b64, pts}) => {
   const img = new Image(); img.src = 'data:image/jpeg;base64,' + b64; await img.decode();

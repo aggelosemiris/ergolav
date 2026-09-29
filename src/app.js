@@ -15,7 +15,7 @@ const BARS = 18;
 let LINES = [], TITLE = 'εργασίες';
 const eur = c => (c/100).toLocaleString('el-GR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const fmtQty = q => q.toLocaleString('el-GR', {maximumFractionDigits:2});
+const fmtQty = formatQty;   // ίδια ακρίβεια (3 δεκαδικά) με την είσοδο της ποσότητας
 const $ = id => document.getElementById(id);
 let started = 0, checkedCount = 0;
 

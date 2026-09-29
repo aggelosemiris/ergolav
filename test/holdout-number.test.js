@@ -35,3 +35,12 @@ for(const [id, [input, expected]] of Object.entries(ORACLE)){
 test('holdout B: το μήνυμα προτείνει «1500 ή 1,5»', () => {
   assert.match(parseAmount('1.500').error, /1500 ή 1,5\b/);
 });
+
+// K — προσθήκη της QA (2ος γύρος): «1.234.56» → ΜΠΛΟΚ, και ό,τι προτείνει το μήνυμα περνά το ίδιο από τον parser.
+test('holdout K: "1.234.56" → ΜΠΛΟΚ, με πρόταση που περνά από τον parser', () => {
+  const r = parseAmount('1.234.56', {maxDecimals: 2, allowZero: true});
+  assert.equal(r.value, undefined, `έπρεπε ΜΠΛΟΚ, πήρε ${r.value}`);
+  const suggested = [...r.error.matchAll(/γράψε (?:π\.χ\. )?([\d.,]+?)(?=[ .]*(?:ή|$))/g)].map(m => m[1]);
+  assert.ok(suggested.length, `το μήνυμα δεν προτείνει αριθμό: ${r.error}`);
+  for(const x of suggested) assert.equal(parseAmount(x).error, undefined, `η πρόταση «${x}» μπλοκάρεται: ${r.error}`);
+});

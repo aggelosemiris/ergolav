@@ -2,6 +2,7 @@
 // Κανόνας: ποτέ σιωπηλά λάθος τιμή — ό,τι είναι αμφίσημο ή άκυρο επιστρέφει {error}, όχι αριθμό.
 
 const count = (s, ch) => s.split(ch).length - 1;
+const valid = (s, maxDecimals, allowZero) => parseAmount(s, {maxDecimals, allowZero}).value !== undefined;
 
 /**
  * @returns {{value:number}|{error:string}}
@@ -35,9 +36,16 @@ export function parseAmount(input, {maxDecimals = 2, allowZero = false} = {}){
     else if(/^\d{1,3}\.\d{3}$/.test(s)){
       // «1.500»: 1500 ή 1,5; — δεν μαντεύουμε.
       const asDec = s.replace('.', ',').replace(/0+$/, '').replace(/,$/, '');
-      return {error: `«${input}»: ασαφές — γράψε ${s.replace('.', '')} ή ${asDec}.`};
+      const opts = [s.replace('.', ''), asDec].filter(o => !/^0\d/.test(o) && valid(o, maxDecimals, allowZero));
+      return {error: `«${input}»: ασαφές — ` + (opts.length ? `γράψε ${opts.join(' ή ')}.` : 'γράψε τον αριθμό χωρίς τελεία.')};
     }
-    else return {error: `«${input}»: στα ελληνικά η υποδιαστολή είναι κόμμα — γράψε ${s.replace(/\./g, ',')}.`};
+    else {
+      // Προτείνουμε διόρθωση μόνο αν περνά η ίδια από τον parser (π.χ. «1.234.56» → όχι «1,234,56»).
+      const fix = s.replace(/\./g, ',');
+      return {error: dots === 1 && valid(fix, maxDecimals, allowZero)
+        ? `«${input}»: στα ελληνικά η υποδιαστολή είναι κόμμα — γράψε ${fix}.`
+        : `«${input}»: λάθος διαχωρισμός — γράψε π.χ. 1.234,56.`};
+    }
   } else intPart = s;
 
   if(decPart.length > maxDecimals) return {error: `«${input}»: έως ${maxDecimals} δεκαδικά.`};

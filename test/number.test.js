@@ -41,3 +41,19 @@ test('ποσότητες: έως 3 δεκαδικά', () => {
   assert.ok(bad('1,1255', {maxDecimals: 3}));
   assert.ok(bad('1.234', {maxDecimals: 3}), 'παραμένει αμφίσημο');
 });
+
+test('κάθε αριθμός που προτείνει ένα μήνυμα σφάλματος περνά ο ίδιος από τον parser', () => {
+  const inputs = ['1.500', '1.000', '0.500', '1.5', '12.50', '1.234.56', '1.23.4', '1.2345', '1,234.56', '1.2345,00',
+    '1,234,567', '12,345', '1 234', '12a', '-3', '1.234,5.6', '999.999'];
+  for(const maxDecimals of [2, 3]) for(const input of inputs){
+    const r = parseAmount(input, {maxDecimals});
+    if(r.value !== undefined) continue;
+    const suggested = [...r.error.matchAll(/γράψε (?:π\.χ\. )?([\d.,]+?)(?=[ .]*(?:ή|$))|ή ([\d.,]+?)\.?$/g)].map(m => m[1] ?? m[2]);
+    for(const x of suggested) assert.equal(parseAmount(x, {maxDecimals}).error, undefined, `«${input}» (${maxDecimals} δεκ.): η πρόταση «${x}» μπλοκάρεται — ${r.error}`);
+  }
+});
+
+test('η ποσότητα εμφανίζεται με τα ίδια δεκαδικά που δέχεται (3)', async () => {
+  const { formatQty } = await import('../src/number.js');
+  assert.equal(formatQty(12.125), '12,125');
+});
