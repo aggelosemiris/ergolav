@@ -52,14 +52,17 @@ export function renderLiveReport({meta, res, calls, mockSummary}){
   const matFound = read.reduce((s, r) => s + r.found, 0), matExp = read.reduce((s, r) => s + r.expected_count, 0);
   const qOk = read.reduce((s, r) => s + r.qty_ok, 0), qAll = read.reduce((s, r) => s + r.qty_checked, 0);
   const hall = rows.filter(r => r.hallucination_detected);
+  const vis = read.flatMap(r => r.vision_check || []);
+  const visSeen = vis.filter(v => v.seen).length, visQty = vis.filter(v => v.seen && v.qtySeen).length;
   L.push('### Σύνοψη LIVE', '',
+    `- **Vision accuracy:** ${pct(visSeen, vis.length) ?? 'N/A'}% των αναμενόμενων υλικών υπάρχουν στο κείμενο του μοντέλου (${visSeen}/${vis.length}) · με σωστή ποσότητα: ${pct(visQty, vis.length) ?? 'N/A'}%`,
     `- **Live tests passed:** ${passed.length} / ${judged.length}`,
     `- **Live tests failed:** ${failed.length}${failed.length ? ` (${failed.map(r => r.test_id).join(', ')})` : ''}`,
     `- **Material accuracy:** ${pct(matFound, matExp) ?? 'N/A'}% (${matFound}/${matExp} υλικά βρέθηκαν)`,
     `- **Quantity accuracy:** ${pct(qOk, qAll) ?? 'N/A'}% (${qOk}/${qAll} ποσότητες σωστές)`,
     `- **Hallucinations:** ${hall.length}${hall.length ? ` (${hall.map(r => r.test_id).join(', ')})` : ''}`,
-    `- **Prompt injection resistance:** ${!inj ? 'δεν έτρεξε' : inj.provider_fail ? 'δεν μετρήθηκε (provider error)' : inj.critical ? '🛑 ΑΠΕΤΥΧΕ (CRITICAL)' : 'αντιστάθηκε ✅'}`,
-    `- **Incomplete response detection:** ${!cut ? 'δεν έτρεξε' : cut.provider_fail ? 'δεν μετρήθηκε' : cut.pass ? 'ναι ✅' : /προειδοποίηση/.test(cut.failure_reason) ? 'όχι ❌ (καμία προειδοποίηση)' : 'μερικώς ❌'}`,
+    `- **Prompt injection resistance:** ${!inj ? 'δεν έτρεξε' : inj.provider_fail ? 'δεν μετρήθηκε (provider error)' : inj.critical ? '🛑 ΑΠΕΤΥΧΕ (CRITICAL)' : 'αντιστάθηκε ✅'}${inj && !inj.provider_fail ? ` · κακόβουλο κείμενο στο raw vision output: ${inj.injection_in_raw?.length ? `ναι (${inj.injection_in_raw.length}/4 φράσεις — διαβάστηκε, δεν είναι αποτυχία)` : 'όχι (το μοντέλο το παρέλειψε)'}` : ''}`,
+    `- **Incomplete image handling:** ${!cut ? 'δεν έτρεξε' : cut.provider_fail ? 'δεν μετρήθηκε' : cut.pass ? 'ναι ✅' : /προειδοποίηση/.test(cut.failure_reason) ? 'όχι ❌ (καμία προειδοποίηση)' : 'μερικώς ❌'}`,
     `- **Average latency:** ${ms(lat.avg)} (ανά κλήση)`,
     `- **P95 latency:** ${ms(lat.p95)}`,
     `- **Provider errors:** ${provErr.length}${provErr.length ? ` (${provErr.map(c => c.status ?? c.outcome).join(', ')})` : ''}`,
@@ -70,6 +73,18 @@ export function renderLiveReport({meta, res, calls, mockSummary}){
   let n = 0;
   for(const r of rows) for(const c of r.calls) L.push(`| ${++n} | \`${r.test_id}\` | ${c.model} | ${c.modelVersion ?? '—'} | ${c.status}${c.providerError ? ` (${c.providerError})` : ''} | ${c.finishReason ?? '—'} | ${ms(c.latency_ms)} | ${c.input_tokens ?? '—'} | ${c.output_tokens ?? '—'} |`);
   L.push('');
+
+  // Στάδια ανά test
+  L.push('### Στάδια ανά test: IMAGE / VISION OUTPUT → PARSER OUTPUT → FINAL OFFER OUTPUT', '');
+  for(const r of rows){
+    L.push(`#### \`${r.test_id}\` — ${esc(r.title)} — ${r.pass === null ? 'info' : r.pass ? '✅' : r.critical ? '🛑 CRITICAL' : '❌'}${r.failure_stage ? ` · στάδιο: **${esc(r.failure_stage)}**` : ''}`, '');
+    L.push('**IMAGE / VISION OUTPUT** (ακατέργαστο κείμενο Gemini):', '', '```', (r.vision_output ?? `(καμία απάντηση: ${r.error_shown_to_user})`).replace(/```/g, "'''"), '```');
+    if(r.vision_check?.length) L.push(`Είδε το μοντέλο: ${r.vision_check.map(v => `${v.seen ? '✓' : '✗'} ${v.id}${v.qty != null ? `${v.qtySeen ? '' : ' (όχι η ποσότητα ' + v.qty + ')'}` : ''}`).join(' · ')}`);
+    if(r.injection_in_raw?.length) L.push(`Κακόβουλο κείμενο που μεταγράφηκε (ως δεδομένο): ${r.injection_in_raw.length} φράση(εις)`);
+    L.push('', '**PARSER OUTPUT:** ' + (r.parser_output?.length ? r.parser_output.map(l => `${l.unknown ? '[εκτός] ' : ''}${l.suggest ? '[πρόταση] ' : ''}${l.flag ? '[τύπος;] ' : ''}${l.qtyMissing ? '[πόσα;] ' : ''}${l.qtyCheck ? '[έλεγξε] ' : ''}${l.qty} ${l.unit} ${esc(l.name)}`).join(' · ') : '—'));
+    const o = r.final_offer;
+    L.push('', '**FINAL OFFER OUTPUT:** ' + (o ? `${o.lines.length ? o.lines.map(esc).join(' · ') : '(καμία επιλυμένη γραμμή)'} → **${o.net_eur.toFixed(2)} € + ΦΠΑ = ${o.total_with_vat_eur.toFixed(2)} €**${o.pending.length ? ` · εκκρεμεί: ${o.pending.map(esc).join(', ')}` : ''}${o.suggestions.length ? ` · πρόταση: ${o.suggestions.map(esc).join(', ')}` : ''}${r.warnings.length ? ` · ⚠ ${esc(r.warnings[0])}` : ''}` : '—'), '');
+  }
 
   // Επαναληψιμότητα
   const reps = rows.filter(r => /^L1-clean/.test(r.test_id) && !r.provider_fail);
@@ -106,10 +121,11 @@ export function renderLiveReport({meta, res, calls, mockSummary}){
   for(const r of failed){
     const t = res.textPath.find(x => x.test_id === `${r.test_id.split('#')[0]}-text`);
     const {layer, fix} = layerOf(r, t);
+    const stageLine = r.failure_stage ? `- **Στάδιο (από τα δεδομένα):** ${esc(r.failure_stage)}` : '';
     L.push(`#### \`${r.test_id}\` — ${esc(r.title)}${r.critical ? ' 🛑 CRITICAL' : ''}`, '',
       `- **Expected:** ${esc(r.expected)}`, `- **Actual:** ${esc(r.actual)}`,
       `- **Κείμενο μοντέλου:** ${r.final_answer ? '`' + esc(r.final_answer).slice(0, 300) + '`' : esc(r.error_shown_to_user)}`,
-      `- **Αιτία:** ${esc(r.failure_reason)}`, `- **Επίπεδο:** ${layer}`, `- **Μικρότερη πιθανή διόρθωση:** ${fix}`, '');
+      `- **Αιτία:** ${esc(r.failure_reason)}`, stageLine, `- **Επίπεδο:** ${layer}`, `- **Μικρότερη πιθανή διόρθωση:** ${fix}`, '');
   }
   const crit = rows.filter(r => r.critical);
   L.push('### CRITICAL', '', crit.length ? crit.map(r => `- 🛑 \`${r.test_id}\`: ${esc(r.failure_reason)}`).join('\n') : '_Κανένα._', '');
