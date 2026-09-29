@@ -46,8 +46,31 @@ function makeLine(item, qty, tokens){
 // Συντομογραφίες σημειώσεων («12 μ.», «τ.μ.», «τεμ.») — η τελεία τους δεν κλείνει φράση.
 const ABBR = /(^|[\s\d])(τ\.\s?μ|τμ|μ|τεμ|τεμαχ|μετ|κιλ|λιτ|σακ|κουτ)\./gi;
 
+// Μονάδες που μπορεί να ακολουθούν την ποσότητα (κανονικοποιημένες ρίζες → εμφάνιση).
+const UNIT_WORDS = [[/^(μ|μετρ|μετ)/, 'μ.'], [/^(τμ|τετραγων)/, 'τ.μ.'], [/^τεμ/, 'τεμ.'], [/^σακ/, 'σακί'],
+  [/^(κιλ|kg)/, 'kg'], [/^λιτ/, 'λ.'], [/^κουτ/, 'κουτί'], [/^(ζευγ|ζευγαρ)/, 'ζεύγος']];
+const unitOf = tok => UNIT_WORDS.find(([re]) => re.test(tok))?.[1];
+const wordTok = w => norm(w).replace(/[«»"'().,;:!?]/g, '');
+
+// Υλικό εκτός καταλόγου: κρατάμε ποσότητα/μονάδα και ό,τι απομένει ως περιγραφή.
+function unknownLine(seg){
+  let qty = null, unit = '';
+  const rest = seg.split(/\s+/).filter(w => {
+    const t = wordTok(w);
+    const n = toNumber(t);
+    if(n != null && qty == null){ qty = n; return false; }
+    const u = t.length <= 12 && unitOf(t);
+    if(u && !unit && qty != null){ unit = u; return false; }
+    return true;
+  }).join(' ').replace(/^[\s,.:-]+|[\s,.:;-]+$/g, '');
+  return {id:'unknown', name: rest ? rest[0].toUpperCase() + rest.slice(1) : seg, unit, qty: qty ?? 1, mat:0, lab:0, unknown:true};
+}
+
 export function parse(text){
-  text = text.replace(ABBR, (_, pre, ab) => pre + ab.replace(/[.\s]/g, '') + ' ');
+  text = text
+    .replace(/[*_#`]+/g, ' ')                          // markdown (**έντονα**, # τίτλοι)
+    .replace(/^[ \t]*(?:\d{1,2}[.)]|[-•–·])[ \t]+/gm, '') // αρίθμηση/κουκκίδες λίστας
+    .replace(ABBR, (_, pre, ab) => pre + ab.replace(/[.\s]/g, '') + ' ');
   const lines = [], unknown = [];
   let title = '';
   for(const raw of text.split(SPLIT)){
@@ -55,7 +78,9 @@ export function parse(text){
     if(!seg) continue;
     const tokens = norm(seg).split(/[\s\-–—/]+/).map(t => t.replace(/[«»"'()]/g, '')).filter(Boolean);
     let pending = null, found = 0;
+    const used = new Set();
     for(let i = 0; i < tokens.length; i++){
+      if(used.has(i)) continue;
       const n = toNumber(tokens[i]);
       if(n != null){
         // «είκοσι πέντε» → 25
@@ -65,6 +90,13 @@ export function parse(text){
       const item = findItem(tokens, i);
       if(!item) continue;
       found++;
+      // Ποσότητα μετά το υλικό («σωλήνας 12 μέτρα»): ψάχνουμε μέχρι το επόμενο υλικό.
+      if(pending == null){
+        for(let j = i + 1; j < tokens.length && !findItem(tokens, j); j++){
+          const m = toNumber(tokens[j]);
+          if(m != null){ pending = m; used.add(j); break; }
+        }
+      }
       const qty = pending ?? 1;
       pending = null;
       const line = makeLine(item, qty, tokens);
@@ -72,8 +104,9 @@ export function parse(text){
       if(same) same.qty += qty; else lines.push(line);
     }
     if(found) continue;
-    if(!title && hasAny(tokens, TITLE_WORDS)) title = seg.replace(/[.,;!?]+$/, '');
-    else if(tokens.length >= 2 || pending != null) unknown.push(seg);
+    const onlyQty = tokens.every(t => toNumber(t) != null || unitOf(t));
+    if(!title && pending == null && hasAny(tokens, TITLE_WORDS)) title = seg.replace(/[.,;:!?]+$/, '');
+    else if(!onlyQty && (tokens.length >= 2 || pending != null || tokens[0].length >= 4)) unknown.push(seg);
   }
 
   // Κόλλα για τα πλακάκια, αν δεν ειπώθηκε (≈5 kg/τ.μ. + 10%).
@@ -82,7 +115,7 @@ export function parse(text){
     const glue = CATALOG.find(c => c.id === 'glue');
     lines.push({...makeLine(glue, Math.max(1, Math.ceil(tiles * 5 * 1.1 / 25)), []), suggest:true});
   }
-  for(const u of unknown) lines.push({id:'unknown', name:u, unit:'', qty:0, mat:0, lab:0, unknown:true});
+  for(const u of unknown) lines.push(unknownLine(u));
 
   return {title: title ? title[0].toLowerCase() + title.slice(1) : '', lines};
 }

@@ -183,8 +183,8 @@ function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown).
 
 function buildLines(text){
   const r = parse(text);
-  if(!r.lines.some(l => !l.unknown)){
-    notice('Δεν βρήκα υλικά από τον κατάλογο. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
+  if(!r.lines.length){
+    notice('Δεν βρήκα υλικά στο κείμενο. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
     return;
   }
   LINES = r.lines; TITLE = r.title || 'εργασίες';
@@ -198,10 +198,22 @@ function renderLines(){
     el.className = 'ln' + ((l.flag||l.suggest||l.unknown)?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
     if(l.unknown){
+      const per = esc(l.unit || 'τεμ.');
       el.innerHTML = `
-        <div class="ln-top"><span class="ln-name">«${esc(l.name)}»</span></div>
-        <div class="ask">Δεν το βρήκα στον κατάλογο. Θα το προσθέσεις με το χέρι αργότερα.</div>
-        <div class="sug-act"><button data-a="drop">Εντάξει, βγάλ' το</button></div>`;
+        <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
+        <div class="ask">Δεν είναι στον κατάλογο. Βάλε τιμή ανά ${per}:</div>
+        <div class="prices">
+          <label>Υλικό €<input inputmode="decimal" data-p="mat" placeholder="0,00"></label>
+          <label>Εργασία €<input inputmode="decimal" data-p="lab" placeholder="0,00"></label>
+        </div>
+        <div class="sug-act"><button data-a="add">Πρόσθεσέ το</button><button data-a="drop">Βγάλ' το</button></div>`;
+      const cents = k => Math.round(parseFloat((el.querySelector(`[data-p="${k}"]`).value || '0').replace(/\s/g,'').replace(',', '.')) * 100) || 0;
+      el.querySelector('[data-a="add"]').onclick=()=>{
+        const mat = cents('mat'), lab = cents('lab');
+        if(mat <= 0 && lab <= 0){ el.querySelector('[data-p="mat"]').focus(); return; }
+        Object.assign(l, {mat, lab, unknown:false, unit: l.unit || 'τεμ.', code:'Εκτός καταλόγου'});
+        checkedCount++; renderLines();
+      };
       el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
     } else if(l.flag){
       el.innerHTML = `

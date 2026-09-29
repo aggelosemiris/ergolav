@@ -62,3 +62,18 @@ test('σημειώσεις με συντομογραφίες και μία γρ�
   assert.equal(byId(r, 'wc')[0].qty, 1);
   assert.equal(r.lines.filter(l => l.unknown).length, 0);
 });
+
+test('λίστα με αρίθμηση/markdown και ποσότητα μετά το υλικό', () => {
+  const r = parse('**Ανακαίνιση μπάνιου**\n1. Σωλήνας 12 μέτρα\n2. Διακόπτες 2 τεμάχια\n- 1 τεμάχιο λεκάνη');
+  assert.equal(r.title, 'ανακαίνιση μπάνιου');
+  assert.equal(byId(r, 'pipe')[0].qty, 12);
+  assert.equal(byId(r, 'valve')[0].qty, 2);
+  assert.equal(byId(r, 'wc')[0].qty, 1);
+  assert.equal(r.lines.filter(l => l.unknown).length, 0);
+});
+
+test('υλικά εκτός καταλόγου κρατούν ποσότητα, μονάδα και περιγραφή', () => {
+  const r = parse('2 τεμάχια βρύσες\n5 μέτρα καλώδιο\nφλοτέρ');
+  assert.deepEqual(r.lines.map(l => [l.unknown, l.qty, l.unit, l.name]),
+    [[true, 2, 'τεμ.', 'Βρύσες'], [true, 5, 'μ.', 'Καλώδιο'], [true, 1, '', 'Φλοτέρ']]);
+});
