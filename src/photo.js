@@ -22,7 +22,11 @@ const PROMPT = `Αυτή είναι φωτογραφία με σημειώσει
 export const getKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
 // Η επικόλληση στο κινητό φέρνει συχνά κενά, αλλαγές γραμμής ή αόρατους χαρακτήρες.
 export const cleanKey = k => (k || '').replace(/[\s​-‍⁠﻿"'«»]/g, '');
-export const setKey = k => { k = cleanKey(k); try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} };
+export const setKey = k => {
+  k = cleanKey(k);
+  // Αν επικολλήθηκε μαζί με άλλο κείμενο (π.χ. «API key: AIza…»), κρατάμε μόνο το κλειδί.
+  k = (k.match(/AIza[0-9A-Za-z_-]{35}/) || k.match(/sk-ant-[0-9A-Za-z_-]+/) || [k])[0];
+  try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} };
 
 /** Μικραίνει τη φωτογραφία (μεγάλη πλευρά ≤ 1568px) και τη δίνει ως base64 JPEG. */
 export async function shrink(file){
@@ -45,7 +49,8 @@ async function client(apiKey){
   return {Anthropic, api: new Anthropic({apiKey, dangerouslyAllowBrowser: true})};
 }
 
-const isGoogleKey = k => k.startsWith('AIza');
+// Μόνο τα κλειδιά Anthropic έχουν σταθερό πρόθεμα· οτιδήποτε άλλο το δοκιμάζουμε στη Google.
+const isGoogleKey = k => !k.startsWith('sk-ant-');
 
 /** Επιστρέφει το κείμενο των σημειώσεων ή ρίχνει Error με ελληνικό μήνυμα. */
 export async function readNotes(base64, apiKey = getKey()){
@@ -61,10 +66,11 @@ const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-fl
 const mask = k => `${k.slice(0, 6)}…${k.slice(-4)} (${k.length} χαρακτήρες)`;
 
 async function readWithGemini(base64, apiKey){
-  if(!/^AIza[0-9A-Za-z_-]{35}$/.test(apiKey)){
+  // Κομμένο/κρυμμένο αντίγραφο (π.χ. «AIzaSy…••••Xyz9»): δεν αξίζει να το στείλουμε.
+  if(apiKey.length < 30 || /[…•*·]|\.\.\./.test(apiKey)){
     setKey('');
-    throw new Error(`Το key δεν έχει τη μορφή κλειδιού Google (AIza… με 39 χαρακτήρες). Έβαλες: ${mask(apiKey)}. ` +
-      'Στο AI Studio πάτα το εικονίδιο αντιγραφής δίπλα στο key — όχι το κείμενο που φαίνεται με τις τελείες.');
+    throw new Error(`Αυτό μοιάζει με κομμένο αντίγραφο του key: ${mask(apiKey)}. Τα κλειδιά Google έχουν ~39 χαρακτήρες ` +
+      'και ξεκινούν με AIza. Στο AI Studio πάτα το εικονίδιο αντιγραφής δίπλα στο key — όχι το κείμενο με τις τελείες.');
   }
   let r, body;
   for(const model of GEMINI_MODELS){
@@ -123,7 +129,7 @@ async function readWithClaude(base64, apiKey){
   } catch (e) {
     if(e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError){
       setKey('');
-      throw new Error('Το API key δεν είναι σωστό. Βάλε το ξανά.');
+      throw new Error(`Η Anthropic δεν δέχτηκε το key ${mask(apiKey)}. Βάλε το ξανά.`);
     }
     if(e instanceof Anthropic.RateLimitError) throw new Error('Πολλά αιτήματα μαζί. Δοκίμασε σε λίγο.');
     if(e instanceof Anthropic.APIConnectionError) throw new Error('Δεν υπάρχει σύνδεση στο internet.');
