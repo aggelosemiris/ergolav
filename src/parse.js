@@ -34,7 +34,8 @@ function makeLine(item, qty, tokens){
   const q = (item.qualifiers || []).find(q => hasAny(tokens, q.kw));
   if(q) line.name = q.name;
   if(item.options){
-    const picked = item.options.find(o => hasAny(tokens, o.kw));
+    // Αν δεν ειπώθηκε τύπος και το υλικό έχει συνηθισμένη επιλογή (def), την παίρνουμε χωρίς ερώτηση.
+    const picked = item.options.find(o => hasAny(tokens, o.kw)) ?? item.options[item.def];
     const base = line.name;
     line.pick = o => ({name:`${base} ${o.label}`, code:o.code, mat:o.mat, lab:o.lab ?? item.lab ?? 0});
     if(picked){ Object.assign(line, line.pick(picked)); }
@@ -78,7 +79,7 @@ export function parse(text){
     if(!seg) continue;
     const tokens = norm(seg).split(/[\s\-–—/]+/).map(t => t.replace(/[«»"'()]/g, '')).filter(Boolean);
     let pending = null, found = 0;
-    const used = new Set();
+    const used = new Set(), seen = new Set();
     for(let i = 0; i < tokens.length; i++){
       if(used.has(i)) continue;
       const n = toNumber(tokens[i]);
@@ -89,6 +90,9 @@ export function parse(text){
       }
       const item = findItem(tokens, i);
       if(!item) continue;
+      // Δεύτερη λέξη για το ίδιο υλικό στην ίδια φράση («2 κάδοι μπάζα») — όχι νέα γραμμή.
+      if(pending == null && seen.has(item.id)) continue;
+      seen.add(item.id);
       found++;
       // Ποσότητα μετά το υλικό («σωλήνας 12 μέτρα»): ψάχνουμε μέχρι το επόμενο υλικό.
       if(pending == null){
