@@ -143,7 +143,7 @@ async function readPhoto(img){
   cta('Διαβάζω…', null, true);
   $('listenLabel').textContent = 'Διαβάζω τις σημειώσεις σου…';
   try {
-    const text = await readNotes(img.data);
+    const text = await readNotes(img.data, {onStatus: s => $('listenLabel').textContent = s});
     pendingPhoto = null;
     shot.classList.remove('reading');
     review(text);

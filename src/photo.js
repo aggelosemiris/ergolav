@@ -53,40 +53,54 @@ async function client(apiKey){
 const isGoogleKey = k => !k.startsWith('sk-ant-');
 
 /** Επιστρέφει το κείμενο των σημειώσεων ή ρίχνει Error με ελληνικό μήνυμα. */
-export async function readNotes(base64, apiKey = getKey()){
+export async function readNotes(base64, {apiKey = getKey(), onStatus} = {}){
   if(!apiKey) throw new Error('NO_KEY');
-  const text = isGoogleKey(apiKey) ? await readWithGemini(base64, apiKey) : await readWithClaude(base64, apiKey);
+  const text = isGoogleKey(apiKey) ? await readWithGemini(base64, apiKey, onStatus) : await readWithClaude(base64, apiKey);
   if(!text || /ΚΑΜΙΑ ΣΗΜΕΙΩΣΗ/.test(text)) throw new Error('Δεν βρήκα σημειώσεις υλικών στη φωτογραφία.');
   return text;
 }
 
 // Google Gemini (δωρεάν επίπεδο με όρια — στο δωρεάν επίπεδο η Google μπορεί να κρατά τα δεδομένα για βελτίωση).
-// Η Google αλλάζει συχνά ονόματα μοντέλων: αν κάποιο δεν υπάρχει (404), δοκιμάζουμε το επόμενο.
-const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+// Αν ένα μοντέλο δεν υπάρχει (404), είναι φορτωμένο (5xx) ή τελείωσε το δωρεάν όριό του (429 — μετράει
+// ξεχωριστά ανά μοντέλο), δοκιμάζουμε το επόμενο· αν αποτύχουν όλα από φόρτο, ξαναδοκιμάζουμε λίγο αργότερα.
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+const RETRY_WAITS = [0, 3000, 8000];
+const busy = s => s === 429 || s >= 500;
 const mask = k => `${k.slice(0, 6)}…${k.slice(-4)} (${k.length} χαρακτήρες)`;
 
-async function readWithGemini(base64, apiKey){
+async function readWithGemini(base64, apiKey, onStatus){
   // Κομμένο/κρυμμένο αντίγραφο (π.χ. «AIzaSy…••••Xyz9»): δεν αξίζει να το στείλουμε.
   if(apiKey.length < 30 || /[…•*·]|\.\.\./.test(apiKey)){
     setKey('');
     throw new Error(`Αυτό μοιάζει με κομμένο αντίγραφο του key: ${mask(apiKey)}. Τα κλειδιά Google έχουν ~39 χαρακτήρες ` +
       'και ξεκινούν με AIza. Στο AI Studio πάτα το εικονίδιο αντιγραφής δίπλα στο key — όχι το κείμενο με τις τελείες.');
   }
-  let r, body;
-  for(const model of GEMINI_MODELS){
-    try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
-        body: JSON.stringify({contents: [{parts: [
-          {inline_data: {mime_type: 'image/jpeg', data: base64}},
-          {text: PROMPT},
-        ]}]}),
-      });
-    } catch { throw new Error('Δεν υπάρχει σύνδεση στο internet.'); }
-    body = await r.json().catch(() => ({}));
-    if(r.status !== 404) break;
+  let r, body, lastBusy = null;
+  rounds: for(const [round, wait] of RETRY_WAITS.entries()){
+    if(wait){
+      onStatus?.(`Η Google είναι φορτωμένη — ξαναδοκιμάζω (${round}/${RETRY_WAITS.length - 1})…`);
+      await new Promise(ok => setTimeout(ok, wait));
+    }
+    for(const model of GEMINI_MODELS){
+      try {
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+          body: JSON.stringify({contents: [{parts: [
+            {inline_data: {mime_type: 'image/jpeg', data: base64}},
+            {text: PROMPT},
+          ]}]}),
+        });
+      } catch { throw new Error('Δεν υπάρχει σύνδεση στο internet.'); }
+      body = await r.json().catch(() => ({}));
+      if(busy(r.status)) lastBusy = {r, body};
+      else if(r.status !== 404) break rounds; // επιτυχία ή λάθος που δεν λύνεται με άλλο μοντέλο
+    }
+    // Όλα τα μοντέλα είναι απλώς ανύπαρκτα (404): δεν έχει νόημα να περιμένουμε.
+    if(!lastBusy) break;
   }
+  // Αναφέρουμε τον φόρτο, όχι το 404 κάποιου μοντέλου που απλώς δεν υπάρχει.
+  if(r.status === 404 && lastBusy) ({r, body} = lastBusy);
   if(!r.ok){
     const err = body.error || {};
     const reason = err.details?.find(d => d.reason)?.reason || err.status || '';
@@ -100,6 +114,7 @@ async function readWithGemini(base64, apiKey){
     if(reason === 'API_KEY_HTTP_REFERRER_BLOCKED' || reason === 'API_KEY_SERVICE_BLOCKED' || r.status === 403)
       throw new Error('Το key έχει περιορισμούς (sites/APIs) που μπλοκάρουν αυτή τη σελίδα. Βγάλε τους περιορισμούς ή φτιάξε νέο key.' + google);
     if(r.status === 429) throw new Error('Έφτασες το δωρεάν όριο της Google. Δοκίμασε σε λίγο.' + google);
+    if(r.status >= 500) throw new Error('Οι servers της Google είναι φορτωμένοι αυτή τη στιγμή — δεν φταίει το key σου. Δοκίμασε ξανά σε λίγα λεπτά.');
     if(/location is not supported/i.test(err.message || '')) throw new Error('Η Google δεν δίνει το δωρεάν Gemini API σε αυτή τη χώρα.' + google);
     throw new Error(`Η ανάγνωση απέτυχε (${r.status}).` + google);
   }
