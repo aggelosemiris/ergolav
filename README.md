@@ -2,6 +2,8 @@
 
 Ο τεχνίτης λέει στο κινητό τι χρειάζεται η δουλειά και βγαίνει έτοιμη προσφορά για τον πελάτη.
 
+**Live:** https://aggelosemiris.github.io/ergolav/
+
 ## Μικρόφωνο σε πραγματικό χρόνο
 
 - **Φωνή → κείμενο**: Web Speech API (`SpeechRecognition`, `el-GR`) με ενδιάμεσα αποτελέσματα.
@@ -23,7 +25,7 @@ npm start        # http://localhost:8080
 npm test         # tests του parser
 ```
 
-Στο κινητό: ανέβασέ το σε GitHub Pages (ή οποιοδήποτε https hosting).
+Στο κινητό: άνοιξε το live link παραπάνω (GitHub Pages, Settings → Pages → Deploy from a branch → αυτό το branch, `/ (root)`).
 
 ## Αρχεία
 
