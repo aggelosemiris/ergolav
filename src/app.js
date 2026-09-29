@@ -98,6 +98,7 @@ function review(text, msg){
   $('listenAlt').hidden = false;
   $('resume').hidden = !micSupported;
   $('sample').hidden = !!text;
+  $('changeKey').hidden = true;
   const sync = () => {
     const t = transcript.textContent.trim();
     renderChips(t);
@@ -149,14 +150,18 @@ async function readPhoto(img){
     buildLines(text);
   } catch (err) {
     shot.classList.remove('reading');
-    // Χωρίς (σωστό) κλειδί: ζητάμε κλειδί και κρατάμε τη φωτογραφία για μετά.
-    if(!getKey()){ openKey(); review('', err.message === 'NO_KEY' ? '' : err.message); return; }
-    pendingPhoto = null;
-    review('', err.message + ' Μπορείς να γράψεις τι λένε οι σημειώσεις.');
+    const msg = err.message === 'NO_KEY' ? '' : err.message;
+    // Κρατάμε τη φωτογραφία: με άλλο key ξαναδιαβάζεται χωρίς νέα λήψη.
+    review('', msg && msg + ' Μπορείς και να γράψεις τι λένε οι σημειώσεις.');
+    $('changeKey').hidden = false;
+    if(!getKey()) openKey(msg);
   }
 }
 
-function openKey(){
+$('changeKey').onclick = () => openKey();
+
+function openKey(msg){
+  $('keyError').hidden = !msg; $('keyError').textContent = msg || '';
   $('keyInput').value = '';
   $('veil').classList.add('on'); $('keySheet').classList.add('on');
   setTimeout(() => $('keyInput').focus(), 250);

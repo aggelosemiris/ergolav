@@ -20,7 +20,9 @@ const PROMPT = `Αυτή είναι φωτογραφία με σημειώσει
 Απάντησε μόνο με τις γραμμές, χωρίς τίποτα άλλο.`;
 
 export const getKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
-export const setKey = k => { try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} };
+// Η επικόλληση στο κινητό φέρνει συχνά κενά, αλλαγές γραμμής ή αόρατους χαρακτήρες.
+export const cleanKey = k => (k || '').replace(/[\s​-‍⁠﻿"'«»]/g, '');
+export const setKey = k => { k = cleanKey(k); try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} };
 
 /** Μικραίνει τη φωτογραφία (μεγάλη πλευρά ≤ 1568px) και τη δίνει ως base64 JPEG. */
 export async function shrink(file){
@@ -54,28 +56,46 @@ export async function readNotes(base64, apiKey = getKey()){
 }
 
 // Google Gemini (δωρεάν επίπεδο με όρια — στο δωρεάν επίπεδο η Google μπορεί να κρατά τα δεδομένα για βελτίωση).
-const GEMINI_MODEL = 'gemini-flash-latest';
+// Η Google αλλάζει συχνά ονόματα μοντέλων: αν κάποιο δεν υπάρχει (404), δοκιμάζουμε το επόμενο.
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+const mask = k => `${k.slice(0, 6)}…${k.slice(-4)} (${k.length} χαρακτήρες)`;
+
 async function readWithGemini(base64, apiKey){
-  let r;
-  try {
-    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
-      body: JSON.stringify({contents: [{parts: [
-        {inline_data: {mime_type: 'image/jpeg', data: base64}},
-        {text: PROMPT},
-      ]}]}),
-    });
-  } catch { throw new Error('Δεν υπάρχει σύνδεση στο internet.'); }
-  const body = await r.json().catch(() => ({}));
+  if(!/^AIza[0-9A-Za-z_-]{35}$/.test(apiKey)){
+    setKey('');
+    throw new Error(`Το key δεν έχει τη μορφή κλειδιού Google (AIza… με 39 χαρακτήρες). Έβαλες: ${mask(apiKey)}. ` +
+      'Στο AI Studio πάτα το εικονίδιο αντιγραφής δίπλα στο key — όχι το κείμενο που φαίνεται με τις τελείες.');
+  }
+  let r, body;
+  for(const model of GEMINI_MODELS){
+    try {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+        body: JSON.stringify({contents: [{parts: [
+          {inline_data: {mime_type: 'image/jpeg', data: base64}},
+          {text: PROMPT},
+        ]}]}),
+      });
+    } catch { throw new Error('Δεν υπάρχει σύνδεση στο internet.'); }
+    body = await r.json().catch(() => ({}));
+    if(r.status !== 404) break;
+  }
   if(!r.ok){
-    const reason = body.error?.details?.find(d => d.reason)?.reason || body.error?.status || '';
-    if(r.status === 401 || r.status === 403 || reason === 'API_KEY_INVALID'){
+    const err = body.error || {};
+    const reason = err.details?.find(d => d.reason)?.reason || err.status || '';
+    const google = err.message ? ` Η Google λέει: «${err.message}»` : '';
+    if(reason === 'API_KEY_INVALID'){
       setKey('');
-      throw new Error('Το API key δεν είναι σωστό. Βάλε το ξανά.');
+      throw new Error(`Η Google δεν αναγνωρίζει το key ${mask(apiKey)}. Φτιάξε/αντέγραψε νέο από το aistudio.google.com/apikey.`);
     }
-    if(r.status === 429) throw new Error('Έφτασες το δωρεάν όριο της Google. Δοκίμασε σε λίγο.');
-    throw new Error(`Η ανάγνωση απέτυχε (${r.status}).`);
+    if(reason === 'SERVICE_DISABLED' || /has not been used|is disabled/i.test(err.message || ''))
+      throw new Error('Το key είναι από project όπου δεν είναι ενεργό το Gemini API. Φτιάξε key από το aistudio.google.com/apikey.' + google);
+    if(reason === 'API_KEY_HTTP_REFERRER_BLOCKED' || reason === 'API_KEY_SERVICE_BLOCKED' || r.status === 403)
+      throw new Error('Το key έχει περιορισμούς (sites/APIs) που μπλοκάρουν αυτή τη σελίδα. Βγάλε τους περιορισμούς ή φτιάξε νέο key.' + google);
+    if(r.status === 429) throw new Error('Έφτασες το δωρεάν όριο της Google. Δοκίμασε σε λίγο.' + google);
+    if(/location is not supported/i.test(err.message || '')) throw new Error('Η Google δεν δίνει το δωρεάν Gemini API σε αυτή τη χώρα.' + google);
+    throw new Error(`Η ανάγνωση απέτυχε (${r.status}).` + google);
   }
   const cand = body.candidates?.[0];
   if(!cand || cand.finishReason === 'SAFETY') throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί.');

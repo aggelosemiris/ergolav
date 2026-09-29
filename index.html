@@ -201,6 +201,7 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
       <div class="row-alt" id="listenAlt" hidden>
         <button class="ghost" id="resume">🎙 Συνέχισε να μιλάς</button>
         <button class="ghost" id="sample" hidden>Βάλε παράδειγμα</button>
+        <button class="ghost" id="changeKey" hidden>🔑 Άλλαξε key</button>
       </div>
     </section>
 
@@ -263,8 +264,10 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
     <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>
     ή από το <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic</a> (Claude).
     Μένει μόνο σε αυτό το κινητό.</p>
+  <div class="notice" id="keyError" role="alert" hidden style="margin:0 0 12px"></div>
   <div class="field"><label for="keyInput">API key</label>
-    <input id="keyInput" type="password" autocomplete="off" placeholder="AIza… ή sk-ant-…"></div>
+    <input id="keyInput" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+           placeholder="AIza… ή sk-ant-…"></div>
   <div class="sheet-btns">
     <button class="ghost" id="keyCancel">Άκυρο</button>
     <button class="primary" id="keySave">Αποθήκευση</button>
