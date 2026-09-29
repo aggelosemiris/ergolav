@@ -1,4 +1,4 @@
-// Φωτογραφία σημειώσεων → κείμενο με το Claude (vision). Το API key μένει μόνο σε αυτή τη συσκευή.
+// Φωτογραφία σημειώσεων → κείμενο (Google Gemini ή Claude, ανάλογα με το key). Το key μένει μόνο σε αυτή τη συσκευή.
 
 const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.129.0/+esm';
 const KEY_STORE = 'ergolav.anthropicKey';
@@ -43,9 +43,46 @@ async function client(apiKey){
   return {Anthropic, api: new Anthropic({apiKey, dangerouslyAllowBrowser: true})};
 }
 
+const isGoogleKey = k => k.startsWith('AIza');
+
 /** Επιστρέφει το κείμενο των σημειώσεων ή ρίχνει Error με ελληνικό μήνυμα. */
 export async function readNotes(base64, apiKey = getKey()){
   if(!apiKey) throw new Error('NO_KEY');
+  const text = isGoogleKey(apiKey) ? await readWithGemini(base64, apiKey) : await readWithClaude(base64, apiKey);
+  if(!text || /ΚΑΜΙΑ ΣΗΜΕΙΩΣΗ/.test(text)) throw new Error('Δεν βρήκα σημειώσεις υλικών στη φωτογραφία.');
+  return text;
+}
+
+// Google Gemini (δωρεάν επίπεδο με όρια — στο δωρεάν επίπεδο η Google μπορεί να κρατά τα δεδομένα για βελτίωση).
+const GEMINI_MODEL = 'gemini-flash-latest';
+async function readWithGemini(base64, apiKey){
+  let r;
+  try {
+    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+      body: JSON.stringify({contents: [{parts: [
+        {inline_data: {mime_type: 'image/jpeg', data: base64}},
+        {text: PROMPT},
+      ]}]}),
+    });
+  } catch { throw new Error('Δεν υπάρχει σύνδεση στο internet.'); }
+  const body = await r.json().catch(() => ({}));
+  if(!r.ok){
+    const reason = body.error?.details?.find(d => d.reason)?.reason || body.error?.status || '';
+    if(r.status === 401 || r.status === 403 || reason === 'API_KEY_INVALID'){
+      setKey('');
+      throw new Error('Το API key δεν είναι σωστό. Βάλε το ξανά.');
+    }
+    if(r.status === 429) throw new Error('Έφτασες το δωρεάν όριο της Google. Δοκίμασε σε λίγο.');
+    throw new Error(`Η ανάγνωση απέτυχε (${r.status}).`);
+  }
+  const cand = body.candidates?.[0];
+  if(!cand || cand.finishReason === 'SAFETY') throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί.');
+  return (cand.content?.parts || []).map(p => p.text || '').join('\n').trim();
+}
+
+async function readWithClaude(base64, apiKey){
   let Anthropic, api;
   try { ({Anthropic, api} = await client(apiKey)); }
   catch { throw new Error('Δεν φόρτωσε η υπηρεσία ανάγνωσης. Έλεγξε τη σύνδεση.'); }
@@ -75,7 +112,5 @@ export async function readNotes(base64, apiKey = getKey()){
   }
 
   if(res.stop_reason === 'refusal') throw new Error('Η φωτογραφία δεν μπόρεσε να διαβαστεί.');
-  const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-  if(!text || /ΚΑΜΙΑ ΣΗΜΕΙΩΣΗ/.test(text)) throw new Error('Δεν βρήκα σημειώσεις υλικών στη φωτογραφία.');
-  return text;
+  return res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
 }
