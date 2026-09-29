@@ -25,7 +25,11 @@ function withGps(jpeg){
   [38, 2, 3].forEach((v, i) => { t.writeUInt32BE(v, 56 + i * 8); t.writeUInt32BE(1, 60 + i * 8); });
   const payload = Buffer.concat([Buffer.from('Exif\0\0', 'binary'), t]);
   const app1 = Buffer.concat([Buffer.from([0xFF, 0xE1]), Buffer.from([(payload.length + 2) >> 8, (payload.length + 2) & 255]), payload]);
-  return Buffer.concat([jpeg.subarray(0, 2), app1, jpeg.subarray(2)]);                                          // αμέσως μετά το SOI
+  // + IPTC (APP13) και σχόλιο (COM): μεταδεδομένα εκτός APP1, για να ελεγχθεί η λευκή λίστα.
+  const seg = (marker, body) => Buffer.concat([Buffer.from([0xFF, marker, (body.length + 2) >> 8, (body.length + 2) & 255]), body]);
+  const app13 = seg(0xED, Buffer.from('Photoshop 3.0\0' + '8BIM IPTC Πελάτης Παπαδόπουλος', 'utf8'));
+  const com = seg(0xFE, Buffer.from('Οδός Ερμού 12, τηλ 6900000000', 'utf8'));
+  return Buffer.concat([jpeg.subarray(0, 2), app1, app13, com, jpeg.subarray(2)]);                             // αμέσως μετά το SOI
 }
 // Μεταδεδομένα ψάχνονται ΜΟΝΟ στα segments πριν από τα δεδομένα εικόνας (SOS). Μέσα στα συμπιεσμένα
 // δεδομένα το ζεύγος 0x88 0x25 εμφανίζεται τυχαία (~1 στις 20 εκτελέσεις) — ήταν ψευδής συναγερμός.
@@ -42,11 +46,16 @@ function headerSegments(buf){
 const app1 = buf => headerSegments(buf).filter(s => s.marker === 0xE1);
 const hasExif = buf => app1(buf).some(s => s.data.subarray(0, 6).equals(Buffer.from('Exif\0\0', 'binary')));
 const hasGpsIfd = buf => app1(buf).some(s => s.data.includes(Buffer.from([0x88, 0x25])));
+// Λευκή λίστα: πριν από το SOS επιτρέπονται μόνο όσα βάζει ο browser στην επανακωδικοποίηση.
+// APP0/JFIF, APP2/ICC, DQT, SOF0/SOF2, DHT, DRI, SOS. Οτιδήποτε άλλο (APP1 EXIF/XMP, APP13 IPTC, COM…) = αποτυχία.
+const ALLOWED = new Set([0xE0, 0xE2, 0xDB, 0xC0, 0xC2, 0xC4, 0xDD, 0xDA]);
+const foreignSegments = buf => headerSegments(buf).map(s => s.marker).filter(m => !ALLOWED.has(m)).map(m => '0x' + m.toString(16));
 
 const src = withGps(fs.readFileSync(new URL('../stress/fixtures/01-normal.jpg', import.meta.url)));
 const tmp = new URL('./.gps-test.jpg', import.meta.url);
 fs.writeFileSync(tmp, src);
 check('η είσοδος έχει EXIF με GPS (έλεγχος του ίδιου του test)', hasExif(src) && hasGpsIfd(src));
+check('η είσοδος αποτυγχάνει στη λευκή λίστα (APP1, APP13, COM)', foreignSegments(src).join(' ') === '0xe1 0xed 0xfe', foreignSegments(src).join(' '));
 
 const b = await chromium.launch(process.env.CHROMIUM_PATH ? {executablePath: process.env.CHROMIUM_PATH} : {});
 const p = await b.newPage({viewport: {width: 400, height: 860}});
@@ -80,7 +89,7 @@ if(process.env.PRIVACY_DUMP) fs.writeFileSync(process.env.PRIVACY_DUMP, bytes);
 check('στάλθηκε JPEG', bytes[0] === 0xFF && bytes[1] === 0xD8);
 check('τα bytes που στάλθηκαν ΔΕΝ έχουν EXIF', !hasExif(bytes));
 check('τα bytes που στάλθηκαν ΔΕΝ έχουν GPS IFD', !hasGpsIfd(bytes));
-check('τα bytes που στάλθηκαν δεν έχουν κανένα APP1 segment (EXIF/XMP)', app1(bytes).length === 0,
+check('τα bytes που στάλθηκαν έχουν μόνο segments της λευκής λίστας (κανένα APP1/APP13/COM…)', foreignSegments(bytes).length === 0,
   headerSegments(bytes).map(s => '0x' + s.marker.toString(16)).join(' '));
 // Αποκωδικοποίηση ΤΩΝ BYTES ΠΟΥ ΣΤΑΛΘΗΚΑΝ και δειγματοληψία pixels.
 const px = await p.evaluate(async ({b64, pts}) => {
