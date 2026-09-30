@@ -27,6 +27,12 @@ jobs:
         run: npm test
       - name: Μόνο τα αρχεία της εφαρμογής (όχι tests/fixtures)
         run: mkdir _site && cp -r index.html src vendor .nojekyll _headers _site/
+      - name: Αριθμός έκδοσης στα αρχεία (οι browsers κρατούσαν παλιά αρχεία του κινητού)
+        run: |
+          V=${GITHUB_SHA::7}
+          sed -i -E "s#src/app\.js\"#src/app.js?v=$V\"#; s#id=\"build\">dev<#id=\"build\">$V<#" _site/index.html
+          sed -i -E "s#(from '\./[a-z]+\.js)'#\1?v=$V'#" _site/src/*.js
+          grep -n "v=$V" _site/index.html _site/src/*.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
