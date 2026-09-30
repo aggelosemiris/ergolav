@@ -272,7 +272,9 @@ function showFieldError(el, key, msg){
   el.querySelector(`[data-p="${key}"]`).focus();
 }
 
-function lineTotal(l){ return Math.round(l.qty*(l.mat+l.lab)); }
+// Υλικό και εργασία στρογγυλοποιούνται ξεχωριστά ανά γραμμή — ίδια με τα σύνολα (sums), ώστε το PDF να «βγάζει» στο λεπτό.
+const matOf = l => Math.round(l.qty * l.mat), labOf = l => Math.round(l.qty * l.lab);
+function lineTotal(l){ return matOf(l) + labOf(l); }
 const needsQty = l => l.qtyMissing || l.qtyCheck;
 function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l)).length; }
 
@@ -359,7 +361,7 @@ function renderLines(){
         <div class="ln-meta">${esc(l.code)}</div>
         <div class="ln-row">
           <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><span class="num">${fmtQty(l.qty)} ${esc(l.unit)}</span><button aria-label="Περισσότερα" data-d="1">+</button></div>
-          <div class="split num">υλικό ${eur(l.mat)}<br>εργασία ${eur(l.lab)}</div>
+          <div class="split num">υλικό ${eur(matOf(l))}<br>${l.lab > 0 ? `εργασία ${eur(labOf(l))}` : 'χωρίς εργασία'}</div>
         </div>`;
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
@@ -415,10 +417,12 @@ function buildPdf(){
     <h2>Προσφορά: ${esc(TITLE)}</h2>
     <div class="who">Προς: ${esc(client)}</div>
     <table>
-      <tr><th>Περιγραφή</th><th>Ποσ.</th><th>Ποσό</th></tr>
-      ${LINES.filter(l=>l.qty>0 && !l.unknown).map(l=>`<tr><td>${esc(l.name)}</td><td class="num">${fmtQty(l.qty)} ${esc(l.unit)}</td><td class="num">${eur(lineTotal(l))}</td></tr>`).join('')}
+      <tr><th>Περιγραφή</th><th class="r">Υλικό</th><th class="r">Εργασία</th><th class="r">Σύνολο</th></tr>
+      ${LINES.filter(l=>l.qty>0 && !l.unknown).map(l=>`<tr><td>${esc(l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : '—'}</td><td class="num">${l.lab > 0 ? eur(labOf(l)) : '—'}</td><td class="num">${eur(lineTotal(l))}</td></tr>`).join('')}
     </table>
     <div class="sum num">
+      <div><span>Υλικά</span><span>${eur(s.mat)}</span></div>
+      <div><span>Εργασία</span><span>${eur(s.lab)}</span></div>
       <div><span>Καθαρή αξία</span><span>${eur(s.net)}</span></div>
       <div><span>ΦΠΑ ${vatRate}%</span><span>${eur(s.vat)}</span></div>
       <div class="g"><span>Σύνολο</span><span>${eur(s.total)}</span></div>

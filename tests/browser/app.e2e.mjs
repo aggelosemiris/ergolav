@@ -79,6 +79,16 @@ ok('#4 ΦΠΑ 17%', /ΦΠΑ 17%/.test(t17), t17.match(/ΦΠΑ 17%[^Σ]*/)?.[0]);
 await p.click('#ctaBtn');
 await p.waitForSelector('#s-pdf.on');
 ok('#4 ΦΠΑ 17% και στο PDF', /ΦΠΑ 17%/.test(await p.textContent('#pdf')));
+// Εργασία δίπλα σε κάθε γραμμή του PDF: υλικό + εργασία = σύνολο γραμμής, και το άθροισμα της στήλης = «Εργασία» στα σύνολα.
+const eurN = t => t.trim() === '—' ? 0 : Number(t.replace(/[^\d,]/g, '').replace(',', '.'));
+const rows = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr => [...tr.children].map(td => td.textContent)));
+ok('#6 το PDF έχει στήλη Εργασία δίπλα σε κάθε γραμμή', rows.length > 0 && rows.every(r => r.length === 4), `${rows.length} γραμμές`);
+ok('#6 κάθε γραμμή: υλικό + εργασία = σύνολο', rows.every(r => Math.abs(eurN(r[1]) + eurN(r[2]) - eurN(r[3])) < 0.005), JSON.stringify(rows.slice(0, 3)));
+const labSum = rows.reduce((a, r) => a + eurN(r[2]), 0);
+const labTotal = eurN(await p.$eval('#pdf .sum div:nth-child(2) span:last-child', e => e.textContent));
+ok('#6 άθροισμα στήλης Εργασία = σύνολο Εργασίας', Math.abs(labSum - labTotal) < 0.005, `${labSum} vs ${labTotal}`);
+ok('#6 γραμμή χωρίς εργασία δείχνει «—»', rows.some(r => r[2].trim() === '—'), JSON.stringify(rows.map(r => r[2])));
+if(process.env.SHOT_DIR) await p.locator('#pdf').screenshot({path: process.env.SHOT_DIR + '/pdf.png'});
 await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000}).catch(() => {});
 ok('#5 PDF φτιάχνεται με ενεργή CSP', await p.textContent('#ctaBtn') === 'Στείλε στον πελάτη', await p.textContent('#ctaBtn'));
 
