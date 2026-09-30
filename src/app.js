@@ -276,7 +276,7 @@ function showFieldError(el, key, msg){
 const matOf = l => Math.round(l.qty * l.mat), labOf = l => Math.round(l.qty * l.lab);
 function lineTotal(l){ return matOf(l) + labOf(l); }
 const needsQty = l => l.qtyMissing || l.qtyCheck;
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l)).length; }
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l) || l.labBad).length; }
 
 function buildLines(text, warning){
   const r = parse(text);
@@ -361,20 +361,38 @@ function renderLines(){
         <div class="ln-meta">${esc(l.code)}</div>
         <div class="ln-row">
           <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><span class="num">${fmtQty(l.qty)} ${esc(l.unit)}</span><button aria-label="Περισσότερα" data-d="1">+</button></div>
-          <div class="split num">υλικό ${eur(matOf(l))}<br>${l.lab > 0 ? `εργασία ${eur(labOf(l))}` : 'χωρίς εργασία'}</div>
-        </div>`;
+          <div class="split num">υλικό ${eur(matOf(l))}</div>
+        </div>
+        <div class="prices"><label>Εργασία € <span class="for">(για ${fmtQty(l.qty)} ${esc(l.unit)})</span><input inputmode="decimal" data-p="lab" value="${centsText(labOf(l))}" placeholder="0"><small class="parsed" data-o="lab"></small></label></div>`;
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
         renderLines();
+      });
+      const readLab = numField(el, 'lab', {allowZero: true}, formatEur);
+      el.querySelector('[data-p="lab"]').addEventListener('input', () => {
+        const r = readLab();
+        if(r.error){ l.labBad = true; refreshCta(); return; }
+        if(l.qty <= 0){ l.labBad = true; showFieldError(el, 'lab', 'Βάλε πρώτα ποσότητα.'); refreshCta(); return; }
+        l.labBad = false;
+        l.lab = toCents(r.value) / l.qty;
+        el.querySelector('.ln-sum').textContent = eur(lineTotal(l));
+        renderTotals(); refreshCta();
       });
     }
     box.appendChild(el);
   });
   renderTotals();
+  refreshCta();
+}
+function refreshCta(){
   const left = unresolved();
   cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0,
       left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : '');
 }
+// Η εργασία κάθε γραμμής είναι ΔΙΚΗ ΤΟΥ ΤΕΧΝΙΤΗ: η τιμή του καταλόγου είναι μόνο η αρχική πρόταση.
+// Το πεδίο δείχνει το σύνολο της γραμμής (π.χ. «για το μπάνιο 300 €»)· αποθηκεύεται ανά μονάδα, ώστε να
+// ακολουθεί την ποσότητα όταν αλλάξει με τα +/−.
+const centsText = c => { const t = (c / 100).toFixed(2).replace('.', ','); return t.replace(/,00$/, ''); };
 // ΦΠΑ: τον συντελεστή τον ΕΠΙΛΕΓΕΙ ο τεχνίτης (προτίμηση συσκευής, προεπιλογή 24%). Η εφαρμογή δεν προτείνει
 // και δεν ελέγχει ποιος ισχύει (εξαρτάται από τόπο, είδος εργασίας, προϋποθέσεις)· ευθύνη τεχνίτη/λογιστή.
 // Πηγές για τους αριθμούς: docs/SOURCES.md.

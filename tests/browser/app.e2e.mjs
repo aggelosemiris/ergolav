@@ -72,6 +72,19 @@ ok('#0 γραμμές', true, names.join(' · '));
 const totals = (await p.textContent('#totals')).replace(/\s+/g, ' ');
 ok('#0 υλικά = 2×1.234,50 + 1000×185 = 187.469,00 €', totals.includes('187.469,00'), totals.slice(0, 80));
 
+// #7 η εργασία κάθε γραμμής την κρίνει ο τεχνίτης
+const labIn = p.locator('.ln:has([data-d]) [data-p="lab"]').first();
+const row = p.locator('.ln:has([data-d])').first();
+ok('#7 προσυμπληρωμένο από τον κατάλογο (σύνολο γραμμής)', await labIn.inputValue() === '90000', await labIn.inputValue());
+await labIn.fill('1.500');
+ok('#7 «1.500» στην εργασία → μήνυμα ασάφειας', /ασαφές/.test(await row.locator('[data-o="lab"]').textContent()));
+ok('#7 με άκυρη εργασία το κουμπί μπλοκάρει', await p.locator('#ctaBtn').isDisabled());
+await labIn.fill('300,50');
+ok('#7 «300,50» → προεπισκόπηση', (await row.locator('[data-o="lab"]').textContent()).includes('300,50 €'));
+ok('#7 το κουμπί ξεμπλοκάρει', await p.locator('#ctaBtn').isEnabled());
+ok('#7 το σύνολο γραμμής = υλικό 185.000 + εργασία 300,50', (await row.locator('.ln-sum').textContent()).includes('185.300,50'), await row.locator('.ln-sum').textContent());
+ok('#7 τα σύνολα ενημερώνονται (Εργασία 300,50)', (await p.textContent('#totals')).includes('300,50'));
+
 // #4 ΦΠΑ
 await p.selectOption('#vatRate', '17');
 const t17 = (await p.textContent('#totals')).replace(/\s+/g, ' ');
