@@ -8,6 +8,7 @@
 
 ```sh
 npm run test:stress                 # MOCK — ψεύτικος provider, καμία δικτυακή κλήση, ~1 λεπτό
+npm run test:stress:scale            # 80.000 χρήστες: μετρημένο βάρος/CPU + προσομοίωση provider → SCALE_80K.md
 npm run test:stress:live:dry        # LIVE harness με προσομοιωμένη ανάγνωση — 0 πραγματικές κλήσεις
 npm run test:stress:live            # LIVE — πραγματικό Gemini (χρειάζεται GEMINI_API_KEY)
 STRICT=1 npm run test:stress        # exit code 1 αν αποτύχει κάποιο mock test (για CI)
