@@ -212,6 +212,44 @@ await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
 ok('#C αν δεν βρεθεί τίποτα από τον κατάλογο, δεν γίνεται προσφορά (κουμπί κλειδωμένο, με εξήγηση)', await p.locator('#ctaBtn').isDisabled() && /κανένα υλικό από τον κατάλογο/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
 
+// ── Πληκτρολόγιο: γράφω / διορθώνω το κείμενο ──
+await p.goto('http://localhost:8080/');
+await p.click('#mic');                                            // χωρίς φωνή (headless) → ανοίγει κατευθείαν για γράψιμο
+await p.click('#transcript');
+await p.keyboard.type('τρεις πρίζες');
+ok('#K με το πληκτρολόγιο: τα υλικά βγαίνουν ζωντανά ως τσιπάκια', /πρίζ/i.test(await p.textContent('#chips')), await p.textContent('#chips'));
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+ok('#K τα υλικά πέρασαν στον έλεγχο', await p.locator('.ln:has-text("Πρίζα")').count() === 1);
+await p.click('#editText');
+ok('#K «Διόρθωσε το κείμενο» γυρίζει στο κείμενο, όπως ήταν', await p.isVisible('#s-listen.on') && (await p.textContent('#transcript')).trim() === 'τρεις πρίζες', await p.textContent('#transcript'));
+ok('#K το πληκτρολόγιο είναι έτοιμο (focus στο κείμενο)', await p.evaluate(() => document.activeElement?.id === 'transcript'));
+await p.keyboard.type(' και πέντε σποτ');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+ok('#K μετά τη διόρθωση μπαίνουν και τα δύο υλικά', await p.locator('.ln:has-text("Πρίζα")').count() === 1 && await p.locator('.ln:has-text("σποτ")').count() === 1);
+
+// ── Άγγιγμα στο κείμενο ΟΣΟ ΑΚΟΥΕΙ → σταματά το μικρόφωνο και ανοίγει για γράψιμο (ψεύτικο SpeechRecognition) ──
+const p2 = await ctx.newPage();
+await p2.addInitScript(() => {
+  const Fake = class {
+    start(){ setTimeout(() => this.onresult?.({results: [Object.assign([{transcript: 'δύο πρίζες'}], {isFinal: true})]}), 80); }
+    stop(){ setTimeout(() => this.onend?.(), 10); }
+  };
+  window.SpeechRecognition = window.webkitSpeechRecognition = Fake;      // ο Chromium έχει και τα δύο ονόματα
+});
+await p2.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+await p2.goto('http://localhost:8080/');
+await p2.click('#mic');
+await p2.waitForFunction(() => /πρίζ/i.test(document.getElementById('chips').textContent));
+ok('#K ακούει: το κείμενο έχει γίνει επεξεργάσιμο ΜΟΝΟ μετά το άγγιγμα', await p2.getAttribute('#transcript', 'contenteditable') === 'false');
+await p2.click('#transcript');
+await p2.waitForFunction(() => document.getElementById('transcript').contentEditable === 'true');
+ok('#K άγγιγμα στο κείμενο = σταματά το μικρόφωνο και δίνει πληκτρολόγιο (focus)', await p2.evaluate(() => document.activeElement?.id === 'transcript') && await p2.isVisible('#resume'));
+await p2.keyboard.type(' και τρία σποτ');
+ok('#K ό,τι είχε ακουστεί μένει και προστίθεται ό,τι γράφει', /δύο πρίζες/.test(await p2.textContent('#transcript')) && /τρία σποτ/.test(await p2.textContent('#transcript')), await p2.textContent('#transcript'));
+await p2.click('#ctaBtn'); await p2.waitForSelector('#s-lines.on');
+ok('#K και τα δύο υλικά μπήκαν', await p2.locator('.ln:has-text("Πρίζα")').count() === 1 && await p2.locator('.ln:has-text("σποτ")').count() === 1);
+await p2.close();
+
 ok('#5 κανένα script/αίτημα σε τρίτο domain εκτός API', external.every(h => /generativelanguage|api\.anthropic|fonts\.g/.test(h)), [...new Set(external)].join(', '));
 ok('#5 καμία παραβίαση CSP', csp.length === 0, csp.join(' | '));
 ok('καμία JS εξαίρεση', errs.length === 0, errs.join(' | '));

@@ -20,7 +20,7 @@ const eur = c => (c/100).toLocaleString('el-GR',{minimumFractionDigits:2,maximum
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtQty = formatQty;   // ίδια ακρίβεια (3 δεκαδικά) με την είσοδο της ποσότητας
 const $ = id => document.getElementById(id);
-let started = 0, checkedCount = 0;
+let started = 0, checkedCount = 0, lastText = '';
 
 function show(id, step){
   document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on', s.id===id));
@@ -78,7 +78,7 @@ async function startListening(initial = ''){
   wave.hidden = false; wave.classList.remove('live');
   [...wave.children].forEach(b => b.style.height = '');
   $('listenAlt').hidden = true;
-  $('listenLabel').textContent = 'Ακούω… μίλα φυσικά, πάτα «Τέλος» όταν τελειώσεις';
+  $('listenLabel').textContent = 'Ακούω… μίλα φυσικά, πάτα «Τέλος» όταν τελειώσεις — ή άγγιξε το κείμενο για να γράψεις';
   transcript.contentEditable = 'false';
   transcript.innerHTML = esc(initial) + '<span class="caret"></span>';
   renderChips(initial);
@@ -90,6 +90,16 @@ async function startListening(initial = ''){
     review(initial, 'Δεν μπόρεσα να ξεκινήσω το μικρόφωνο.');
   }
 }
+
+// Άγγιγμα στο κείμενο όσο ακούει = θέλει να γράψει ή να διορθώσει: σταματά το μικρόφωνο και δίνει το πληκτρολόγιο.
+// (Το κείμενο ξαναγράφεται σε κάθε αποτέλεσμα φωνής, γι' αυτό δεν γίνεται να γράφεις την ώρα που ακούει.)
+function focusEnd(el){
+  el.focus();
+  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+}
+transcript.addEventListener('pointerdown', async () => { if(mic.listening){ await finishListening(); focusEnd(transcript); } });
+$('editText').onclick = () => { review(lastText); focusEnd(transcript); };
 
 async function finishListening(){
   cta('Τελειώνω…', null, true);
@@ -286,6 +296,7 @@ const needsQty = l => l.qtyMissing || l.qtyCheck;
 function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.customOpen).length; }
 
 function buildLines(text, warning){
+  lastText = text;                         // για «Διόρθωσε το κείμενο» από την οθόνη ελέγχου
   const r = parse(text);
   $('linesNotice').hidden = !warning; $('linesNotice').textContent = warning || '';
   if(!r.lines.length){
