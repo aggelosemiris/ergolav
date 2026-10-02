@@ -282,7 +282,8 @@ const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !l.unknown && !ne
 // Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
 const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l) || l.customOpen).length; }
+// Στην προσφορά μπαίνουν ΜΟΝΟ υλικά του καταλόγου: ό,τι δεν βρέθηκε (l.unknown) φαίνεται ως «δεν μπαίνει» και δεν μπλοκάρει τίποτα.
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.customOpen).length; }
 
 function buildLines(text, warning){
   const r = parse(text);
@@ -303,27 +304,12 @@ function renderLines(){
   const box = $('lines'); box.innerHTML = '';
   LINES.forEach((l,i)=>{
     const el = document.createElement('div');
-    el.className = 'ln' + ((l.flag||l.suggest||l.unknown||needsQty(l))?' flag':'');
+    el.className = 'ln' + (l.unknown ? ' skip' : (l.flag||l.suggest||needsQty(l))?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
     if(l.unknown){
-      const per = esc(l.unit || 'τεμ.');
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
-        <div class="ask">Δεν είναι στον κατάλογο. Βάλε τιμή υλικού ανά ${per} — ή άφησέ το κενό αν είναι μόνο δουλειά:</div>
-        <div class="prices">
-          <label>Υλικό €<input inputmode="decimal" data-p="mat" placeholder="0,00"><small class="parsed" data-o="mat"></small></label>
-        </div>
-        <div class="sug-act"><button data-a="add">Πρόσθεσέ το</button><button data-a="drop">Βγάλ' το</button></div>`;
-      // Τιμές με αυστηρή ανάγνωση: «1.234,50» = 1.234,50 € · αμφίσημο/άκυρο → μήνυμα, ποτέ σιωπηλή τιμή.
-      const readMat = numField(el, 'mat', {optional: true, allowZero: true}, formatEur);
-      el.querySelector('[data-a="add"]').onclick=()=>{
-        const m = readMat();
-        if(m.error) return;
-        // Κενό = μόνο εργασία: η γραμμή μένει χωρίς υλικό και μετράει στην εργασία (lab = 0, μία τιμή για όλη τη δουλειά).
-        Object.assign(l, {mat: toCents(m.value), lab: 0, unknown:false, offCatalog:true, unit: l.unit || 'τεμ.', code:'Εκτός καταλόγου'});
-        checkedCount++; renderLines();
-      };
-      el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
+        <div class="ask">Δεν υπάρχει στον κατάλογο — δεν μπαίνει στην προσφορά.</div>`;
     } else if(l.flag){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
@@ -361,7 +347,7 @@ function renderLines(){
       el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
     } else {
       if(l.matBase == null) l.matBase = l.mat;                 // η τιμή καταλόγου μένει σταθερή, ώστε οι προτάσεις να μη μετακινούνται
-      const T = l.offCatalog ? null : tiers(l.matBase), cur = l.customOpen ? 'custom' : (l.tier ?? 'normal');
+      const T = tiers(l.matBase), cur = l.customOpen ? 'custom' : (l.tier ?? 'normal');
       const key = priceKey(l), hist = T ? history(key) : [];
       const per = esc(l.unit);
       el.innerHTML = `
@@ -424,8 +410,10 @@ function renderLines(){
 }
 function refreshCta(){
   const left = unresolved();
-  cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0 || laborBad,
-      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : laborBad ? 'Διόρθωσε την εργασία' : '');
+  const none = !LINES.some(l => !l.unknown);                  // τίποτα από τον κατάλογο = δεν υπάρχει προσφορά
+  cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0 || laborBad || none,
+      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`)
+        : laborBad ? 'Διόρθωσε την εργασία' : none ? 'Δεν βρέθηκε κανένα υλικό από τον κατάλογο' : '');
 }
 // Εργασία για όλη τη δουλειά: ΕΝΑ πεδίο, σε δικό του container (το re-render των συνόλων δεν χαλάει το focus την ώρα
 // που γράφει). Προσυμπληρωμένο με την πρόταση του καταλόγου· ό,τι γράψει ο τεχνίτης μένει (δεν αλλάζει μόνο του

@@ -53,24 +53,18 @@ await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
 ok('#3 στάλθηκε η καλυμμένη εικόνα', !!gemBody && gemBody.contents[0].parts[0].inline_data.data.length > 1000);
 
-// #0 τιμές: «1.234,50» σωστά, «1.234» απορρίπτεται
-const unk = p.locator('.ln:has([data-a="add"])').first();
-await unk.locator('[data-p="mat"]').fill('1.234');
-ok('#0 «1.234» → μήνυμα ασάφειας', /ασαφές/.test(await unk.locator('[data-o="mat"]').textContent()));
-await unk.locator('[data-a="add"]').click();
-ok('#0 «1.234» ΔΕΝ προστέθηκε', await p.locator('.ln:has([data-a="add"])').count() === 1);
-await unk.locator('[data-p="mat"]').fill('1.234,50');
-ok('#0 «1.234,50» → προεπισκόπηση', (await unk.locator('[data-o="mat"]').textContent()).includes('1.234,50 €'));
-await unk.locator('[data-a="add"]').click();
-// ποσότητα 1000 (999 + 1): πριν γινόταν 1
+// Στην προσφορά μπαίνουν ΜΟΝΟ υλικά του καταλόγου: το «κλιματιστικά» δεν υπάρχει στον κατάλογο
+const unk = p.locator('.ln.skip:has-text("Κλιματιστικά")');
+ok('#C είδος εκτός καταλόγου: «δεν μπαίνει στην προσφορά»', /δεν μπαίνει στην προσφορά/.test(await unk.textContent()));
+ok('#C χωρίς πεδία τιμής και χωρίς κουμπί «Πρόσθεσέ το»', await unk.locator('input, [data-a="add"]').count() === 0);
+ok('#C δεν μπλοκάρει: μένει μόνο η ποσότητα 999 να επιβεβαιωθεί', /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
 const qc = p.locator('.ln:has([data-p="qty"])').first();
 const pre = await qc.locator('[data-p="qty"]').inputValue();
 ok('#0 ποσότητα 1000 προσυμπληρώνεται χωρίς «1.000»', pre === '1000', pre);
 await qc.locator('[data-a="ok"]').click();
-const names = await p.$$eval('.ln', els => els.map(e => e.querySelector('.ln-name').textContent + ' | ' + e.querySelector('.ln-sum')?.textContent));
-ok('#0 γραμμές', true, names.join(' · '));
+ok('#C με το είδος εκτός καταλόγου στη λίστα, το κουμπί ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled());
 const totals = (await p.textContent('#totals')).replace(/\s+/g, ' ');
-ok('#0 υλικά = 2×1.234,50 + 1000×185 = 187.469,00 €', totals.includes('187.469,00'), totals.slice(0, 80));
+ok('#C στα σύνολα μπαίνει μόνο ο κατάλογος: υλικά = 1000 × 185 = 185.000,00 €', /Υλικά\s*185\.000,00 €/.test(totals), totals.slice(0, 80));
 
 // ── Α. Τιμές υλικού: τρεις προτάσεις + «Άλλη τιμή» με μνήμη ──
 const lek = p.locator('.ln:has(.tiers):has-text("Λεκάνη")').first();
@@ -158,6 +152,7 @@ const matLines = rows.reduce((a, r) => a + eurN(r[1]), 0);
 ok('#B PDF: άθροισμα υλικών γραμμών = «Υλικά»', Math.abs(matLines - await sumRow('Υλικά')) < 0.005, `${matLines} vs ${await sumRow('Υλικά')}`);
 ok('#B PDF: η εργασία εμφανίζεται μία φορά, 300,50 €', (await p.textContent('#pdf')).match(/Εργασία/g).length === 1 && await sumRow('Εργασία') === 300.5);
 ok('#B PDF: υλικά + εργασία = καθαρή αξία', Math.abs(await sumRow('Υλικά') + await sumRow('Εργασία') - await sumRow('Καθαρή')) < 0.005);
+ok('#C το είδος εκτός καταλόγου ΔΕΝ υπάρχει στο PDF', !/Κλιματιστικ/.test(await p.textContent('#pdf')));
 if(process.env.SHOT_DIR) await p.locator('#pdf').screenshot({path: process.env.SHOT_DIR + '/pdf.png'});
 await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000}).catch(() => {});
 ok('#5 PDF φτιάχνεται με ενεργή CSP', await p.textContent('#ctaBtn') === 'Στείλε στον πελάτη', await p.textContent('#ctaBtn'));
@@ -208,6 +203,14 @@ await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
 ok('#B νέα προσφορά: η εργασία ξαναρχίζει από την πρόταση (3 × 12 = 36)', await p.locator('#laborBox [data-p="labor"]').inputValue() === '36', await p.locator('#laborBox [data-p="labor"]').inputValue());
 ok('#A οι τιμές που έγραψε μένουν και στην επόμενη προσφορά (μνήμη ανά συσκευή)', await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('ergolav.prices') || '{}')).length > 0));
+
+// μόνο εκτός καταλόγου → δεν υπάρχει προσφορά
+await p.goto('http://localhost:8080/');
+await p.click('#mic');
+await p.evaluate(() => { const t = document.getElementById('transcript'); t.textContent = 'ένα κλιματιστικό'; t.dispatchEvent(new Event('input', {bubbles: true})); });
+await p.click('#ctaBtn');
+await p.waitForSelector('#s-lines.on');
+ok('#C αν δεν βρεθεί τίποτα από τον κατάλογο, δεν γίνεται προσφορά (κουμπί κλειδωμένο, με εξήγηση)', await p.locator('#ctaBtn').isDisabled() && /κανένα υλικό από τον κατάλογο/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
 
 ok('#5 κανένα script/αίτημα σε τρίτο domain εκτός API', external.every(h => /generativelanguage|api\.anthropic|fonts\.g/.test(h)), [...new Set(external)].join(', '));
 ok('#5 καμία παραβίαση CSP', csp.length === 0, csp.join(' | '));
