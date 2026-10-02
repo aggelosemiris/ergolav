@@ -8,11 +8,14 @@ import { createMic, micSupported } from './mic.js';
 import { readNotes, shrink, getKey, setKey, forgetKey, canRememberKey, isKeyRemembered, keyProvider } from './photo.js';
 import { makePdf, shareFile, download } from './share.js';
 import { parseAmount, toCents, formatEur, formatQty } from './number.js';
+import { tiers, priceKey, history, remember, ageLabel, isStale } from './prices.js';
 
 const SAMPLE = 'Ανακαίνιση μπάνιου. Δώδεκα μέτρα σωλήνα πολυστρωματικό, μια μπαταρία νιπτήρα, λεκάνη κρεμαστή με καζανάκι εντοιχισμού, και δώδεκα τετραγωνικά πλακάκι τοίχου.';
 const BARS = 18;
 
 let LINES = [], TITLE = 'εργασίες';
+// Εργασία: ΜΙΑ τιμή για όλη τη δουλειά (λεπτά). null = αυτόματη πρόταση από τον κατάλογο· αριθμός = ό,τι έγραψε ο τεχνίτης.
+let LABOR = null, laborBad = false;
 const eur = c => (c/100).toLocaleString('el-GR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtQty = formatQty;   // ίδια ακρίβεια (3 δεκαδικά) με την είσοδο της ποσότητας
@@ -272,11 +275,14 @@ function showFieldError(el, key, msg){
   el.querySelector(`[data-p="${key}"]`).focus();
 }
 
-// Υλικό και εργασία στρογγυλοποιούνται ξεχωριστά ανά γραμμή — ίδια με τα σύνολα (sums), ώστε το PDF να «βγάζει» στο λεπτό.
-const matOf = l => Math.round(l.qty * l.mat), labOf = l => Math.round(l.qty * l.lab);
-function lineTotal(l){ return matOf(l) + labOf(l); }
+// Κάθε γραμμή δείχνει μόνο υλικό (στρογγυλοποιημένο ανά γραμμή, όπως στα σύνολα — το PDF «βγάζει» στο λεπτό).
+// Η εργασία είναι μία τιμή για όλη τη δουλειά (LABOR) και δεν ανήκει σε γραμμή.
+const matOf = l => Math.round(l.qty * l.mat);
+const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !l.unknown && !needsQty(l));
+// Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
+const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l) || l.labBad).length; }
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || l.unknown || needsQty(l) || l.customOpen).length; }
 
 function buildLines(text, warning){
   const r = parse(text);
@@ -286,6 +292,7 @@ function buildLines(text, warning){
     return;
   }
   LINES = r.lines; TITLE = r.title || 'εργασίες';
+  LABOR = null; laborBad = false;          // νέα ανάλυση = νέα πρόταση εργασίας
   show('s-lines','Έλεγχος');
   renderLines();
 }
@@ -302,21 +309,18 @@ function renderLines(){
       const per = esc(l.unit || 'τεμ.');
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
-        <div class="ask">Δεν είναι στον κατάλογο. Βάλε τιμή ανά ${per}:</div>
+        <div class="ask">Δεν είναι στον κατάλογο. Βάλε τιμή υλικού ανά ${per} — ή άφησέ το κενό αν είναι μόνο δουλειά:</div>
         <div class="prices">
           <label>Υλικό €<input inputmode="decimal" data-p="mat" placeholder="0,00"><small class="parsed" data-o="mat"></small></label>
-          <label>Εργασία €<input inputmode="decimal" data-p="lab" placeholder="0,00"><small class="parsed" data-o="lab"></small></label>
         </div>
         <div class="sug-act"><button data-a="add">Πρόσθεσέ το</button><button data-a="drop">Βγάλ' το</button></div>`;
       // Τιμές με αυστηρή ανάγνωση: «1.234,50» = 1.234,50 € · αμφίσημο/άκυρο → μήνυμα, ποτέ σιωπηλή τιμή.
       const readMat = numField(el, 'mat', {optional: true, allowZero: true}, formatEur);
-      const readLab = numField(el, 'lab', {optional: true, allowZero: true}, formatEur);
       el.querySelector('[data-a="add"]').onclick=()=>{
-        const m = readMat(), b = readLab();
-        if(m.error || b.error) return;
-        const mat = toCents(m.value), lab = toCents(b.value);
-        if(mat <= 0 && lab <= 0){ showFieldError(el, 'mat', 'Βάλε τιμή υλικού ή εργασίας.'); return; }
-        Object.assign(l, {mat, lab, unknown:false, unit: l.unit || 'τεμ.', code:'Εκτός καταλόγου'});
+        const m = readMat();
+        if(m.error) return;
+        // Κενό = μόνο εργασία: η γραμμή μένει χωρίς υλικό και μετράει στην εργασία (lab = 0, μία τιμή για όλη τη δουλειά).
+        Object.assign(l, {mat: toCents(m.value), lab: 0, unknown:false, offCatalog:true, unit: l.unit || 'τεμ.', code:'Εκτός καταλόγου'});
         checkedCount++; renderLines();
       };
       el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
@@ -334,7 +338,7 @@ function renderLines(){
       });
     } else if(l.suggest){
       el.innerHTML = `
-        <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span><span class="ln-sum num">${eur(lineTotal(l))}</span></div>
+        <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span><span class="ln-sum num">${eur(matOf(l))}</span></div>
         <div class="ask">Δεν το είπες, αλλά χρειάζεται για τα πλακάκια. Το κρατάς;</div>
         <div class="sug-act"><button data-a="keep">Ναι, πρόσθεσέ το</button><button data-a="drop">Όχι</button></div>`;
       el.querySelector('[data-a="keep"]').onclick=()=>{ l.suggest=false; checkedCount++; renderLines(); };
@@ -356,42 +360,76 @@ function renderLines(){
       };
       el.querySelector('[data-a="drop"]').onclick=()=>{ LINES = LINES.filter(x=>x!==l); checkedCount++; renderLines(); };
     } else {
+      if(l.matBase == null) l.matBase = l.mat;                 // η τιμή καταλόγου μένει σταθερή, ώστε οι προτάσεις να μη μετακινούνται
+      const T = l.offCatalog ? null : tiers(l.matBase), cur = l.customOpen ? 'custom' : (l.tier ?? 'normal');
+      const key = priceKey(l), hist = T ? history(key) : [];
+      const per = esc(l.unit);
       el.innerHTML = `
-        <div class="ln-top"><span class="ln-name">${esc(l.name)}</span><span class="ln-sum num">${eur(lineTotal(l))}</span></div>
+        <div class="ln-top"><span class="ln-name">${esc(l.name)}</span><span class="ln-sum num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</span></div>
         <div class="ln-meta">${esc(l.code)}</div>
         <div class="ln-row">
-          <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><span class="num">${fmtQty(l.qty)} ${esc(l.unit)}</span><button aria-label="Περισσότερα" data-d="1">+</button></div>
-          <div class="split num">υλικό ${eur(matOf(l))}</div>
+          <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><span class="num">${fmtQty(l.qty)} ${per}</span><button aria-label="Περισσότερα" data-d="1">+</button></div>
         </div>
-        <div class="prices"><label>Εργασία € <span class="for">(για ${fmtQty(l.qty)} ${esc(l.unit)})</span><input inputmode="decimal" data-p="lab" value="${centsText(labOf(l))}" placeholder="0"><small class="parsed" data-o="lab"></small></label></div>`;
+        ${T ? `
+        <div class="tiers" role="group" aria-label="Τιμή υλικού ανά ${per}">
+          ${[['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']].map(([t, n]) => `
+          <button class="tier${cur === t ? ' on' : ''}" data-t="${t}" aria-pressed="${cur === t}"><span>${n}</span><span class="num">${eur(T[t])}<small>/${per}</small></span></button>`).join('')}
+          <button class="tier${cur === 'custom' || l.tier === 'custom' ? ' on' : ''}" data-t="custom" aria-pressed="${cur === 'custom'}"><span>Άλλη τιμή</span><span class="num">${l.tier === 'custom' && !l.customOpen ? `${eur(l.mat)}<small>/${per}</small>` : '…'}</span></button>
+        </div>
+        ${l.customOpen ? `
+        <div class="custom">
+          <div class="prices"><label>Τιμή υλικού € ανά ${per}<input inputmode="decimal" data-p="cmat" placeholder="0,00" value="${esc(l.customDraft || '')}"><small class="parsed" data-o="cmat"></small></label></div>
+          <div class="hist" data-hist ${hist.length && !l.customDraft ? '' : 'hidden'}>${hist.map(h => `
+            <button class="hi" data-c="${h.c}"><span class="num">${eur(h.c)}</span><span>${ageLabel(h.at)}${isStale(h.at) ? ' · <b>έλεγξε αν άλλαξε</b>' : ''}</span></button>`).join('')}
+          </div>
+          <div class="sug-act"><button data-a="keep">Κράτα την</button><button data-a="cancel">Άκυρο</button></div>
+        </div>` : ''}` : ''}`;
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
         renderLines();
       });
-      const readLab = numField(el, 'lab', {allowZero: true}, formatEur);
-      el.querySelector('[data-p="lab"]').addEventListener('input', () => {
-        const r = readLab();
-        if(r.error){ l.labBad = true; refreshCta(); return; }
-        if(l.qty <= 0){ l.labBad = true; showFieldError(el, 'lab', 'Βάλε πρώτα ποσότητα.'); refreshCta(); return; }
-        l.labBad = false;
-        l.lab = toCents(r.value) / l.qty;
-        el.querySelector('.ln-sum').textContent = eur(lineTotal(l));
-        renderTotals(); refreshCta();
+      el.querySelectorAll('.tier').forEach(b=>b.onclick=()=>{
+        const t = b.dataset.t;
+        if(t === 'custom'){ l.customOpen = true; l.focusCustom = true; renderLines(); return; }
+        Object.assign(l, {tier: t, mat: T[t], customOpen: false, customDraft: ''});
+        renderLines();
       });
+      if(l.customOpen){
+        const input = el.querySelector('[data-p="cmat"]'), histBox = el.querySelector('[data-hist]');
+        const readC = numField(el, 'cmat', {}, v => `${formatEur(v)} ανά ${l.unit}`);
+        // Οι αποθηκευμένες τιμές φαίνονται μόνο όσο το πεδίο είναι άδειο· ποτέ δεν μπαίνουν μόνες τους.
+        input.addEventListener('input', () => { l.customDraft = input.value; histBox.hidden = !!input.value || !hist.length; });
+        histBox.querySelectorAll('.hi').forEach(h => h.onclick = () => {
+          input.value = centsText(+h.dataset.c);
+          input.dispatchEvent(new Event('input', {bubbles: true}));
+          input.focus();
+        });
+        el.querySelector('[data-a="keep"]').onclick = () => {
+          const r = readC();
+          if(r.error) return;
+          const cents = toCents(r.value);
+          Object.assign(l, {mat: cents, tier: 'custom', customOpen: false, customDraft: ''});
+          remember(key, cents);
+          checkedCount++; renderLines();
+        };
+        el.querySelector('[data-a="cancel"]').onclick = () => { Object.assign(l, {customOpen: false, customDraft: ''}); renderLines(); };
+        if(l.focusCustom){ l.focusCustom = false; setTimeout(() => input.focus(), 0); }
+      }
     }
     box.appendChild(el);
   });
+  renderLabor();
   renderTotals();
   refreshCta();
 }
 function refreshCta(){
   const left = unresolved();
-  cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0,
-      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : '');
+  cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0 || laborBad,
+      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : laborBad ? 'Διόρθωσε την εργασία' : '');
 }
-// Η εργασία κάθε γραμμής είναι ΔΙΚΗ ΤΟΥ ΤΕΧΝΙΤΗ: η τιμή του καταλόγου είναι μόνο η αρχική πρόταση.
-// Το πεδίο δείχνει το σύνολο της γραμμής (π.χ. «για το μπάνιο 300 €»)· αποθηκεύεται ανά μονάδα, ώστε να
-// ακολουθεί την ποσότητα όταν αλλάξει με τα +/−.
+// Εργασία για όλη τη δουλειά: ΕΝΑ πεδίο, σε δικό του container (το re-render των συνόλων δεν χαλάει το focus την ώρα
+// που γράφει). Προσυμπληρωμένο με την πρόταση του καταλόγου· ό,τι γράψει ο τεχνίτης μένει (δεν αλλάζει μόνο του
+// όταν αλλάξουν ποσότητες — η πρόταση φαίνεται από κάτω για σύγκριση).
 const centsText = c => { const t = (c / 100).toFixed(2).replace('.', ','); return t.replace(/,00$/, ''); };
 // ΦΠΑ: τον συντελεστή τον ΕΠΙΛΕΓΕΙ ο τεχνίτης (προτίμηση συσκευής, προεπιλογή 24%). Η εφαρμογή δεν προτείνει
 // και δεν ελέγχει ποιος ισχύει (εξαρτάται από τόπο, είδος εργασίας, προϋποθέσεις)· ευθύνη τεχνίτη/λογιστή.
@@ -400,10 +438,31 @@ const VAT_RATES = [24, 17, 13, 9, 6, 4, 0].map(r => [r, `${r}%`]);
 let vatRate = (() => { try { const v = Number(localStorage.getItem('ergolav.vat')); return VAT_RATES.some(([r]) => r === v) && localStorage.getItem('ergolav.vat') !== null ? v : 24; } catch { return 24; } })();
 function setVat(v){ vatRate = v; try { localStorage.setItem('ergolav.vat', String(v)); } catch {} }
 
+function renderLabor(){
+  const box = $('laborBox'), auto = autoLabor();
+  laborBad = false;                                          // το πεδίο ξαναφτιάχνεται πάντα με έγκυρη τιμή
+  box.innerHTML = `
+    <div class="prices"><label>Εργασία για όλη τη δουλειά €<input inputmode="decimal" data-p="labor" value="${centsText(LABOR ?? auto)}" placeholder="0"><small class="parsed" data-o="labor"></small></label></div>
+    <div class="hint" data-hint></div>`;
+  const hint = box.querySelector('[data-hint]');
+  const syncHint = () => {
+    hint.innerHTML = LABOR != null && LABOR !== auto ? `Πρόταση καταλόγου: ${eur(auto)} <button class="linkbtn" data-a="auto">Χρησιμοποίησέ την</button>` : '';
+    const b = hint.querySelector('[data-a="auto"]');
+    if(b) b.onclick = () => { LABOR = null; renderLabor(); renderTotals(); refreshCta(); };
+  };
+  const read = numField(box, 'labor', {allowZero: true}, formatEur);   // αυστηρή ανάγνωση: «1.500» μπλοκάρει
+  box.querySelector('[data-p="labor"]').addEventListener('input', () => {
+    const r = read();
+    if(r.error){ laborBad = true; refreshCta(); return; }   // η τελευταία έγκυρη τιμή μένει, το κουμπί κλειδώνει
+    laborBad = false; LABOR = toCents(r.value);
+    syncHint(); renderTotals(); refreshCta();
+  });
+  syncHint();
+}
+
 function sums(){
-  const ok = LINES.filter(l=>!l.flag && !l.suggest && !l.unknown && !needsQty(l));
-  const mat = ok.reduce((s,l)=>s+Math.round(l.qty*l.mat),0);
-  const lab = ok.reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
+  const mat = okLines().reduce((s,l)=>s+matOf(l),0);
+  const lab = LABOR ?? autoLabor();
   const net = mat+lab, vat = Math.round(net * vatRate / 100);
   return {mat,lab,net,vat,total:net+vat};
 }
@@ -435,8 +494,8 @@ function buildPdf(){
     <h2>Προσφορά: ${esc(TITLE)}</h2>
     <div class="who">Προς: ${esc(client)}</div>
     <table>
-      <tr><th>Περιγραφή</th><th class="r">Υλικό</th><th class="r">Εργασία</th><th class="r">Σύνολο</th></tr>
-      ${LINES.filter(l=>l.qty>0 && !l.unknown).map(l=>`<tr><td>${esc(l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : '—'}</td><td class="num">${l.lab > 0 ? eur(labOf(l)) : '—'}</td><td class="num">${eur(lineTotal(l))}</td></tr>`).join('')}
+      <tr><th>Περιγραφή</th><th class="r">Υλικό</th></tr>
+      ${LINES.filter(l=>l.qty>0 && !l.unknown).map(l=>`<tr><td>${esc(l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
     </table>
     <div class="sum num">
       <div><span>Υλικά</span><span>${eur(s.mat)}</span></div>

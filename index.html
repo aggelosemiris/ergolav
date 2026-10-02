@@ -140,6 +140,20 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 .sug-act{display:flex;gap:8px;margin-top:10px}
 .sug-act button{flex:1;min-height:44px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid var(--line);background:var(--paper)}
 
+.tiers{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+.tier{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 10px;border-radius:10px;background:var(--paper);border:1px solid var(--line);font-size:13px;color:var(--dim);min-height:48px}
+.tier .num{font-size:15px;font-weight:700;color:var(--ink)}
+.tier small{font-weight:400;color:var(--dim);font-size:12px}
+.tier.on{border-color:var(--pen);box-shadow:0 0 0 2px var(--pen-soft);background:var(--pen-soft)}
+.custom{margin-top:6px}
+.hist{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.hist[hidden]{display:none}
+.hi{display:flex;justify-content:space-between;gap:10px;align-items:baseline;text-align:left;padding:10px 12px;border-radius:10px;border:1px dashed var(--line);background:var(--paper);font-size:13px;color:var(--dim);min-height:44px}
+.hi .num{font-size:15px;font-weight:700;color:var(--ink);white-space:nowrap}
+.hi b{color:var(--warn)}
+.labor{margin-top:14px}
+.labor .hint{font-size:13px;color:var(--dim);margin-top:6px}
+
 .totals{margin-top:18px;background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:16px 18px}
 .t{display:flex;justify-content:space-between;font-size:15px;color:var(--dim);padding:3px 0}
 .t.big{color:var(--ink);font-size:22px;font-weight:800;border-top:1px solid var(--line);margin-top:8px;padding-top:12px}
@@ -251,6 +265,7 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
       <p class="lede">Ενδεικτικές τιμές αγοράς (εκτίμηση, χωρίς ΦΠΑ) — όχι ακόμα από προμηθευτή. Έλεγξέ τες πριν τη στείλεις.</p>
       <div class="notice" id="linesNotice" role="alert" hidden></div>
       <div class="lines" id="lines"></div>
+      <div class="labor" id="laborBox"></div>
       <div class="totals" id="totals"></div>
     </section>
 
