@@ -288,22 +288,23 @@ function showFieldError(el, key, msg){
 // Κάθε γραμμή δείχνει μόνο υλικό (στρογγυλοποιημένο ανά γραμμή, όπως στα σύνολα — το PDF «βγάζει» στο λεπτό).
 // Η εργασία είναι μία τιμή για όλη τη δουλειά (LABOR) και δεν ανήκει σε γραμμή.
 const matOf = l => Math.round(l.qty * l.mat);
-const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !l.unknown && !needsQty(l));
+const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l));
 // Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
 const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
-// Στην προσφορά μπαίνουν ΜΟΝΟ υλικά του καταλόγου: ό,τι δεν βρέθηκε (l.unknown) φαίνεται ως «δεν μπαίνει» και δεν μπλοκάρει τίποτα.
 function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.customOpen).length; }
 
 function buildLines(text, warning){
   lastText = text;                         // για «Διόρθωσε το κείμενο» από την οθόνη ελέγχου
   const r = parse(text);
   $('linesNotice').hidden = !warning; $('linesNotice').textContent = warning || '';
-  if(!r.lines.length){
-    notice('Δεν βρήκα υλικά στο κείμενο. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
+  // Στην προετοιμασία της προσφοράς μπαίνουν ΜΟΝΟ υλικά του καταλόγου: ό,τι δεν υπάρχει εκεί (l.unknown) πετιέται εντελώς.
+  const found = r.lines.filter(l => !l.unknown);
+  if(!found.length){
+    notice('Δεν βρήκα κανένα υλικό από τον κατάλογο. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
     return;
   }
-  LINES = r.lines; TITLE = r.title || 'εργασίες';
+  LINES = found; TITLE = r.title || 'εργασίες';
   LABOR = null; laborBad = false;          // νέα ανάλυση = νέα πρόταση εργασίας
   show('s-lines','Έλεγχος');
   renderLines();
@@ -315,13 +316,9 @@ function renderLines(){
   const box = $('lines'); box.innerHTML = '';
   LINES.forEach((l,i)=>{
     const el = document.createElement('div');
-    el.className = 'ln' + (l.unknown ? ' skip' : (l.flag||l.suggest||needsQty(l))?' flag':'');
+    el.className = 'ln' + ((l.flag||l.suggest||needsQty(l))?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
-    if(l.unknown){
-      el.innerHTML = `
-        <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
-        <div class="ask">Δεν υπάρχει στον κατάλογο — δεν μπαίνει στην προσφορά.</div>`;
-    } else if(l.flag){
+    if(l.flag){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
         <div class="ask">Δεν είπες ποιο. Διάλεξε:</div>
@@ -421,10 +418,8 @@ function renderLines(){
 }
 function refreshCta(){
   const left = unresolved();
-  const none = !LINES.some(l => !l.unknown);                  // τίποτα από τον κατάλογο = δεν υπάρχει προσφορά
-  cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0 || laborBad || none,
-      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`)
-        : laborBad ? 'Διόρθωσε την εργασία' : none ? 'Δεν βρέθηκε κανένα υλικό από τον κατάλογο' : '');
+  cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0 || laborBad,
+      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : laborBad ? 'Διόρθωσε την εργασία' : '');
 }
 // Εργασία για όλη τη δουλειά: ΕΝΑ πεδίο, σε δικό του container (το re-render των συνόλων δεν χαλάει το focus την ώρα
 // που γράφει). Προσυμπληρωμένο με την πρόταση του καταλόγου· ό,τι γράψει ο τεχνίτης μένει (δεν αλλάζει μόνο του
@@ -494,7 +489,7 @@ function buildPdf(){
     <div class="who">Προς: ${esc(client)}</div>
     <table>
       <tr><th>Περιγραφή</th><th class="r">Υλικό</th></tr>
-      ${LINES.filter(l=>l.qty>0 && !l.unknown).map(l=>`<tr><td>${esc(l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
+      ${LINES.filter(l=>l.qty>0).map(l=>`<tr><td>${esc(l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
     </table>
     <div class="sum num">
       <div><span>Υλικά</span><span>${eur(s.mat)}</span></div>

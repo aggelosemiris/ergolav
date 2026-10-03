@@ -22,6 +22,15 @@ await p.route('https://api.anthropic.com/**', async r => {
     body: JSON.stringify({id:'m', type:'message', role:'assistant', model: claudeBody.model, stop_reason:'end_turn', content:[{type:'text', text:'12 μέτρα σωλήνας'}], usage:{input_tokens:1, output_tokens:1}})});
 });
 await p.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+
+// Γράφει κείμενο στο πεδίο (headless: δεν υπάρχει μικρόφωνο → η οθόνη ανοίγει για γράψιμο). Περιμένει να είναι έτοιμη,
+// αλλιώς το άκυρο μικρόφωνο «έρχεται» καθυστερημένα και ξαναγράφει την οθόνη (αγώνας χρόνου).
+async function dictate(page, text){
+  await page.click('#mic');
+  await page.waitForFunction(() => document.getElementById('transcript').contentEditable === 'true');
+  await page.evaluate(t => { const el = document.getElementById('transcript'); el.textContent = t; el.dispatchEvent(new Event('input', {bubbles: true})); }, text);
+  await page.waitForFunction(() => { const b = document.getElementById('ctaBtn'); return b.textContent === 'Βγάλε τιμές' && !b.disabled; });
+}
 const results = [];
 const ok = (name, cond, detail='') => { results.push({name, pass: !!cond}); console.log(`${cond ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`); };
 
@@ -53,16 +62,14 @@ await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
 ok('#3 στάλθηκε η καλυμμένη εικόνα', !!gemBody && gemBody.contents[0].parts[0].inline_data.data.length > 1000);
 
-// Στην προσφορά μπαίνουν ΜΟΝΟ υλικά του καταλόγου: το «κλιματιστικά» δεν υπάρχει στον κατάλογο
-const unk = p.locator('.ln.skip:has-text("Κλιματιστικά")');
-ok('#C είδος εκτός καταλόγου: «δεν μπαίνει στην προσφορά»', /δεν μπαίνει στην προσφορά/.test(await unk.textContent()));
-ok('#C χωρίς πεδία τιμής και χωρίς κουμπί «Πρόσθεσέ το»', await unk.locator('input, [data-a="add"]').count() === 0);
-ok('#C δεν μπλοκάρει: μένει μόνο η ποσότητα 999 να επιβεβαιωθεί', /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
+// Στην προετοιμασία της προσφοράς μπαίνουν ΜΟΝΟ υλικά του καταλόγου: το «κλιματιστικά» (και ό,τι δεν υπάρχει) δεν φαίνεται πουθενά
+ok('#C είδος εκτός καταλόγου: δεν υπάρχει ούτε ως κάρτα (ούτε «δεν μπαίνει»)', !/Κλιματιστικ|δεν μπαίνει|Δεν υπάρχει στον κατάλογο/.test(await p.textContent('#lines')), (await p.textContent('#lines')).slice(0, 80));
+ok('#C μένει μόνο η ποσότητα 999 να επιβεβαιωθεί', /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
 const qc = p.locator('.ln:has([data-p="qty"])').first();
 const pre = await qc.locator('[data-p="qty"]').inputValue();
 ok('#0 ποσότητα 1000 προσυμπληρώνεται χωρίς «1.000»', pre === '1000', pre);
 await qc.locator('[data-a="ok"]').click();
-ok('#C με το είδος εκτός καταλόγου στη λίστα, το κουμπί ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled());
+ok('#C μετά την επιβεβαίωση το κουμπί ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled());
 const totals = (await p.textContent('#totals')).replace(/\s+/g, ' ');
 ok('#C στα σύνολα μπαίνει μόνο ο κατάλογος: υλικά = 1000 × 185 = 185.000,00 €', /Υλικά\s*185\.000,00 €/.test(totals), totals.slice(0, 80));
 
@@ -75,7 +82,6 @@ ok('#A οι τρεις προτάσεις + Άλλη τιμή (κανονική 
   [await tierTxt('eco'), await tierTxt('normal'), await tierTxt('premium')].join(' | '));
 ok('#A προεπιλογή: κανονική, η προσφορά βγαίνει όπως πριν (185.000,00 €)', await lek.locator('.tier[data-t="normal"]').getAttribute('aria-pressed') === 'true' && (await lekSum()).includes('185.000,00'), await lekSum());
 ok('#A χωρίς «Άλλη τιμή» δεν υπάρχει πεδίο ούτε λίστα', await lek.locator('[data-p="cmat"], .hist').count() === 0);
-ok('#A είδος εκτός καταλόγου / μόνο εργασίας: καμία επιλογή τιμής', await p.locator('.ln:has-text("Κλιματιστικά") .tier').count() === 0);
 await lek.locator('.tier[data-t="eco"]').click();
 ok('#A οικονομική → υλικό 111,00 €/τεμ. (111.000,00 €)', (await lekSum()).includes('111.000,00'), await lekSum());
 ok('#A οι προτάσεις δεν μετακινούνται όταν αλλάζει η επιλογή', (await tierTxt('normal')).includes('185,00') && (await tierTxt('premium')).includes('351,50'));
@@ -184,8 +190,7 @@ ok('#1 μετά από reload δεν υπάρχει key', !(await p.isVisible('#
 
 // ── Β. γραμμή μόνο εργασίας + νέα ανάλυση μηδενίζει την εργασία ──
 await p.goto('http://localhost:8080/');
-await p.click('#mic');
-await p.evaluate(() => { const t = document.getElementById('transcript'); t.textContent = 'αποξήλωση παλιών ειδών και δύο μπαταρίες νιπτήρα'; t.dispatchEvent(new Event('input', {bubbles: true})); });
+await dictate(p, 'αποξήλωση παλιών ειδών και δύο μπαταρίες νιπτήρα');
 await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
 const dem = p.locator('.ln:has-text("Αποξήλωση")');
@@ -197,24 +202,22 @@ const rows2 = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr =>
 ok('#B PDF: γραμμή μόνο εργασίας γράφει «στην εργασία»', rows2.some(r => /Αποξήλωση/.test(r[0]) && r[1].trim() === 'στην εργασία'), JSON.stringify(rows2));
 // νέα ανάλυση: η εργασία ξαναρχίζει από την πρόταση
 await p.goto('http://localhost:8080/');
-await p.click('#mic');
-await p.evaluate(() => { const t = document.getElementById('transcript'); t.textContent = 'τρεις πρίζες'; t.dispatchEvent(new Event('input', {bubbles: true})); });
+await dictate(p, 'τρεις πρίζες');
 await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
 ok('#B νέα προσφορά: η εργασία ξαναρχίζει από την πρόταση (3 × 12 = 36)', await p.locator('#laborBox [data-p="labor"]').inputValue() === '36', await p.locator('#laborBox [data-p="labor"]').inputValue());
 ok('#A οι τιμές που έγραψε μένουν και στην επόμενη προσφορά (μνήμη ανά συσκευή)', await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('ergolav.prices') || '{}')).length > 0));
 
-// μόνο εκτός καταλόγου → δεν υπάρχει προσφορά
+// μόνο εκτός καταλόγου → δεν υπάρχει προσφορά: μένει στο κείμενο με μήνυμα, δεν ανοίγει οθόνη ελέγχου
 await p.goto('http://localhost:8080/');
-await p.click('#mic');
-await p.evaluate(() => { const t = document.getElementById('transcript'); t.textContent = 'ένα κλιματιστικό'; t.dispatchEvent(new Event('input', {bubbles: true})); });
+await dictate(p, 'ένα κλιματιστικό και δύο ρίζες');
 await p.click('#ctaBtn');
-await p.waitForSelector('#s-lines.on');
-ok('#C αν δεν βρεθεί τίποτα από τον κατάλογο, δεν γίνεται προσφορά (κουμπί κλειδωμένο, με εξήγηση)', await p.locator('#ctaBtn').isDisabled() && /κανένα υλικό από τον κατάλογο/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
+ok('#C αν δεν βρεθεί τίποτα από τον κατάλογο: μήνυμα, και μένεις στο κείμενο (όχι οθόνη ελέγχου)', await p.isVisible('#s-listen.on') && !(await p.isVisible('#s-lines.on')) && /κανένα υλικό από τον κατάλογο/.test(await p.textContent('#notice')), await p.textContent('#notice'));
 
 // ── Πληκτρολόγιο: γράφω / διορθώνω το κείμενο ──
 await p.goto('http://localhost:8080/');
 await p.click('#mic');                                            // χωρίς φωνή (headless) → ανοίγει κατευθείαν για γράψιμο
+await p.waitForFunction(() => document.getElementById('transcript').contentEditable === 'true');
 await p.click('#transcript');
 await p.keyboard.type('τρεις πρίζες');
 ok('#K με το πληκτρολόγιο: τα υλικά βγαίνουν ζωντανά ως τσιπάκια', /πρίζ/i.test(await p.textContent('#chips')), await p.textContent('#chips'));
