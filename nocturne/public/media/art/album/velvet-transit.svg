@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+<defs>
+  <linearGradient id="gc8cov5" gradientTransform="rotate(315 .5 .5)">
+    <stop offset="0" stop-color="#1a1414"/><stop offset="1" stop-color="#7e3b2e"/>
+  </linearGradient>
+  <radialGradient id="rc8cov5" cx="0.1" cy="0.7" r=".9">
+    <stop offset="0" stop-color="#e08e5a" stop-opacity=".55"/><stop offset="1" stop-color="#e08e5a" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="nc8cov5"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="485"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+</defs>
+<rect width="600" height="600" fill="url(#gc8cov5)"/>
+<rect width="600" height="600" fill="url(#rc8cov5)"/>
+<path d="M-20 60 C 150 62.1, 450 90.9, 620 60" fill="none" stroke="#e08e5a" stroke-width="6.5" opacity="0.5"/><path d="M-20 96 C 150 39.7, 450 134.2, 620 96" fill="none" stroke="#f5d7b8" stroke-width="2.4" opacity="0.4"/><path d="M-20 132 C 150 114.6, 450 93.6, 620 132" fill="none" stroke="#e08e5a" stroke-width="4.2" opacity="0.7"/><path d="M-20 168 C 150 145, 450 173.2, 620 168" fill="none" stroke="#f5d7b8" stroke-width="3.1" opacity="0.5"/><path d="M-20 204 C 150 178, 450 153.1, 620 204" fill="none" stroke="#e08e5a" stroke-width="5.3" opacity="0.4"/><path d="M-20 240 C 150 241.1, 450 274.6, 620 240" fill="none" stroke="#f5d7b8" stroke-width="5.5" opacity="0.8"/><path d="M-20 276 C 150 264.4, 450 249.9, 620 276" fill="none" stroke="#e08e5a" stroke-width="3.3" opacity="0.8"/><path d="M-20 312 C 150 282.2, 450 289, 620 312" fill="none" stroke="#f5d7b8" stroke-width="5.5" opacity="0.6"/><path d="M-20 348 C 150 377.8, 450 396.6, 620 348" fill="none" stroke="#e08e5a" stroke-width="3.1" opacity="0.8"/><path d="M-20 384 C 150 435.8, 450 386.8, 620 384" fill="none" stroke="#f5d7b8" stroke-width="4.6" opacity="0.5"/><path d="M-20 420 C 150 430.9, 450 452.1, 620 420" fill="none" stroke="#e08e5a" stroke-width="5.1" opacity="0.5"/><path d="M-20 456 C 150 425.9, 450 474.3, 620 456" fill="none" stroke="#f5d7b8" stroke-width="3.4" opacity="0.6"/><path d="M-20 492 C 150 476.5, 450 481.5, 620 492" fill="none" stroke="#e08e5a" stroke-width="4.4" opacity="0.5"/><path d="M-20 528 C 150 505.3, 450 496.4, 620 528" fill="none" stroke="#f5d7b8" stroke-width="3.5" opacity="0.4"/>
+<rect width="600" height="600" filter="url(#nc8cov5)"/>
+</svg>

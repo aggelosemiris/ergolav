@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+<defs>
+  <linearGradient id="g14l9c4l" gradientTransform="rotate(350 .5 .5)">
+    <stop offset="0" stop-color="#141414"/><stop offset="1" stop-color="#5b5b5b"/>
+  </linearGradient>
+  <radialGradient id="r14l9c4l" cx="0.9" cy="0.9" r=".9">
+    <stop offset="0" stop-color="#d9cbb3" stop-opacity=".55"/><stop offset="1" stop-color="#d9cbb3" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="n14l9c4l"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="177"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+</defs>
+<rect width="600" height="600" fill="url(#g14l9c4l)"/>
+<rect width="600" height="600" fill="url(#r14l9c4l)"/>
+<rect x="2" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="52" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="102" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="152" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="202" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="252" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="302" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="352" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="402" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="452" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="502" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="552" y="360" width="46" height="240" rx="4" fill="#fffaf0" opacity=".9"/><rect x="35" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="85" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="185" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="235" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="285" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="385" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="435" y="360" width="30" height="150" rx="3" fill="#141414"/><rect x="535" y="360" width="30" height="150" rx="3" fill="#141414"/><circle cx="362.9" cy="172.7" r="79.2" fill="#d9cbb3" opacity=".6"/>
+<rect width="600" height="600" filter="url(#n14l9c4l)"/>
+</svg>

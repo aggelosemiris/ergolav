@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+<defs>
+  <linearGradient id="gab4b685" gradientTransform="rotate(77 .5 .5)">
+    <stop offset="0" stop-color="#d1497a"/><stop offset="1" stop-color="#16052b"/>
+  </linearGradient>
+  <radialGradient id="rab4b685" cx="0.7" cy="0.2" r=".9">
+    <stop offset="0" stop-color="#ff9a5a" stop-opacity=".55"/><stop offset="1" stop-color="#ff9a5a" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="nab4b685"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="978"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+</defs>
+<rect width="600" height="600" fill="url(#gab4b685)"/>
+<rect width="600" height="600" fill="url(#rab4b685)"/>
+<circle cx="356.3" cy="190.8" r="168.9" fill="#ff9a5a" opacity=".25"/>
+<ellipse cx="314.9" cy="600" rx="230" ry="190" fill="#16052b" opacity=".92"/>
+<circle cx="314.9" cy="290" r="108" fill="#16052b" opacity=".92"/>
+<circle cx="284.9" cy="262" r="108" fill="#ffd36e" opacity=".08"/>
+<rect width="600" height="600" filter="url(#nab4b685)"/>
+</svg>

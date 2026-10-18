@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+<defs>
+  <linearGradient id="ga1h04nql" gradientTransform="rotate(106 .5 .5)">
+    <stop offset="0" stop-color="#4b5bdc"/><stop offset="1" stop-color="#131133"/>
+  </linearGradient>
+  <radialGradient id="ra1h04nql" cx="0.3" cy="0.6" r=".9">
+    <stop offset="0" stop-color="#7ef0a4" stop-opacity=".55"/><stop offset="1" stop-color="#7ef0a4" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="na1h04nql"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="17"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+</defs>
+<rect width="600" height="600" fill="url(#ga1h04nql)"/>
+<rect width="600" height="600" fill="url(#ra1h04nql)"/>
+<circle cx="247.7" cy="155.5" r="199.9" fill="#7ef0a4" opacity=".25"/>
+<ellipse cx="281.6" cy="600" rx="230" ry="190" fill="#131133" opacity=".92"/>
+<circle cx="281.6" cy="290" r="108" fill="#131133" opacity=".92"/>
+<circle cx="251.6" cy="262" r="108" fill="#ffe96b" opacity=".08"/>
+<rect width="600" height="600" filter="url(#na1h04nql)"/>
+</svg>

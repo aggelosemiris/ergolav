@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+<defs>
+  <linearGradient id="ga1dvfmks" gradientTransform="rotate(327 .5 .5)">
+    <stop offset="0" stop-color="#7e3b2e"/><stop offset="1" stop-color="#1a1414"/>
+  </linearGradient>
+  <radialGradient id="ra1dvfmks" cx="0.2" cy="0.3" r=".9">
+    <stop offset="0" stop-color="#e08e5a" stop-opacity=".55"/><stop offset="1" stop-color="#e08e5a" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="na1dvfmks"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="322"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+</defs>
+<rect width="600" height="600" fill="url(#ga1dvfmks)"/>
+<rect width="600" height="600" fill="url(#ra1dvfmks)"/>
+<circle cx="120.2" cy="143.9" r="150.6" fill="#e08e5a" opacity=".25"/>
+<ellipse cx="329.1" cy="600" rx="230" ry="190" fill="#1a1414" opacity=".92"/>
+<circle cx="329.1" cy="290" r="108" fill="#1a1414" opacity=".92"/>
+<circle cx="299.1" cy="262" r="108" fill="#f5d7b8" opacity=".08"/>
+<rect width="600" height="600" filter="url(#na1dvfmks)"/>
+</svg>
