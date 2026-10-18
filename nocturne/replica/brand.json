@@ -1,0 +1,6 @@
+{
+  "name": "Nocturne",
+  "avoid": ["Spotify", "Spotify AB"],
+  "domains": ["spotify.com", "scdn.co", "spotifycdn.com"],
+  "colors": ["#1DB954", "#1ED760", "#191414", "#121212"]
+}

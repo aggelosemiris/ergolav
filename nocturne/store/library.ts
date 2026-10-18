@@ -159,7 +159,8 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       toast('That did not save. Try again.', { tone: 'error' });
       return;
     }
-    toast(wasLiked ? 'Removed from Liked Songs' : 'Added to Liked Songs');
+    if (wasLiked) toast('Removed from Liked Songs', { action: { label: 'Undo', onClick: () => void get().toggleLike(track) } });
+    else toast('Added to Liked Songs');
   },
 
   createPlaylist: async (name) => {

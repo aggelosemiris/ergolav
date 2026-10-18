@@ -105,7 +105,7 @@ export interface Advance {
  * Move to the next track.
  * auto = the previous track ended by itself. Repeat-one replays only on auto; a manual skip always moves on.
  */
-export function next(state: QueueState, { auto = false }: { auto?: boolean } = {}): Advance {
+export function next(state: QueueState, { auto = false, rng }: { auto?: boolean; rng?: Rng } = {}): Advance {
   if (!state.current) return { state, stop: true };
   if (auto && state.repeat === 'one') return { state: { ...state }, stop: false };
 
@@ -121,6 +121,13 @@ export function next(state: QueueState, { auto = false }: { auto?: boolean } = {
     return { state: { ...state, cursor: nextCursor, current: state.tracks[state.order[nextCursor]], fromUpNext: false }, stop: false };
   }
   // End of the context.
+  if (state.repeat === 'all' && state.shuffle && state.order.length > 1) {
+    // A new lap gets a fresh order (no fixed sequence repeating), never starting with the track just heard.
+    const last = state.order[state.order.length - 1];
+    const order = shuffledOrder(state.order.length, null, rng);
+    if (order[0] === last) [order[0], order[1]] = [order[1], order[0]];
+    return { state: { ...state, order, cursor: 0, current: state.tracks[order[0]], fromUpNext: false }, stop: false };
+  }
   const first = { ...state, cursor: 0, current: state.tracks[state.order[0]], fromUpNext: false };
   if (state.repeat === 'all') return { state: first, stop: false };
   // Repeat off: go back to the start and stop.

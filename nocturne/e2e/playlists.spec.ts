@@ -108,6 +108,21 @@ test.describe('playlists (F05, F09)', () => {
     await expect(rows(page).nth(2)).toContainText('Pixel Harvest');
   });
 
+  test('undo puts a removed song back in its place', async ({ page }) => {
+    const { data } = await user.client.from('playlists').insert({ owner_id: user.id, name: 'Undo Test' }).select('id').single();
+    const album = await idOf('albums', 'title', 'Velvet Transit');
+    const { data: tr } = await user.client.from('tracks').select('id').eq('album_id', album).order('track_number');
+    for (const t of tr!) await user.client.rpc('playlist_add_track', { p_playlist: data!.id, p_track: t.id });
+    await page.goto(`/playlist/${data!.id}`);
+    await rows(page).nth(1).getByRole('button', { name: 'More options for Sleeper Car' }).click();
+    await page.getByRole('menuitem', { name: 'Remove from this playlist' }).click();
+    await expect(rows(page)).toHaveCount(3);
+    await page.getByRole('status').getByRole('button', { name: 'Undo' }).click();
+    await expect(rows(page)).toHaveCount(4);
+    await page.reload();
+    await expect(rows(page).nth(1)).toContainText('Sleeper Car');
+  });
+
   test('a validation error keeps the dialog open', async ({ page }) => {
     const { data } = await user.client.from('playlists').insert({ owner_id: user.id, name: 'Keep Me' }).select('id').single();
     await page.goto(`/playlist/${data!.id}`);
@@ -142,6 +157,11 @@ test.describe('likes, library and history (F06, F10)', () => {
     await page.goto('/collection/tracks');
     await expect(rows(page)).toHaveCount(2);
     await page.reload();
+    await expect(rows(page)).toHaveCount(2);
+    await page.getByRole('button', { name: 'Remove The Long Hallway from Liked Songs' }).click();
+    await expect(rows(page)).toHaveCount(1);
+    // undo, then remove for real
+    await page.getByRole('status').getByRole('button', { name: 'Undo' }).click();
     await expect(rows(page)).toHaveCount(2);
     await page.getByRole('button', { name: 'Remove The Long Hallway from Liked Songs' }).click();
     await expect(rows(page)).toHaveCount(1);

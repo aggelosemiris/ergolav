@@ -21,10 +21,22 @@ export function Toaster() {
           }`}
         >
           <span>{t.message}</span>
-          {t.action && (
+          {t.action?.href && (
             <Link href={t.action.href} onClick={() => dismiss(t.id)} className="underline underline-offset-2 hover:no-underline">
               {t.action.label}
             </Link>
+          )}
+          {t.action?.onClick && (
+            <button
+              type="button"
+              onClick={() => {
+                dismiss(t.id);
+                t.action?.onClick?.();
+              }}
+              className="font-bold underline underline-offset-2 hover:no-underline"
+            >
+              {t.action.label}
+            </button>
           )}
           <button type="button" aria-label="Dismiss" onClick={() => dismiss(t.id)} className="-mr-1 rounded-full p-0.5 opacity-70 hover:opacity-100">
             <X className="size-4" aria-hidden="true" />

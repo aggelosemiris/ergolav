@@ -6,7 +6,7 @@ export interface Toast {
   id: number;
   message: string;
   tone: 'info' | 'error';
-  action?: { label: string; href: string };
+  action?: { label: string; href?: string; onClick?: () => void };
 }
 
 interface UiState {

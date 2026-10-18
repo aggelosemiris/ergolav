@@ -82,6 +82,18 @@ describe('next', () => {
     expect(r.state.upNext).toHaveLength(0);
   });
 
+  it('with shuffle + repeat all, each lap is a fresh order that never repeats the last track first', () => {
+    let s = start(6, 0, { shuffle: true, repeat: 'all' });
+    const lap1 = [...s.order];
+    for (let i = 0; i < 5; i++) s = Q.next(s, { rng: seeded(i + 1) }).state;
+    const lastOfLap = s.current!.id;
+    const r = Q.next(s, { auto: true, rng: seeded(99) });
+    expect(r.stop).toBe(false);
+    expect(new Set(r.state.order).size).toBe(6);
+    expect(r.state.current!.id).not.toBe(lastOfLap);
+    expect(r.state.order).not.toEqual(lap1);
+  });
+
   it('follows the shuffled order', () => {
     const s = start(6, 0, { shuffle: true });
     const { state } = Q.next(s);

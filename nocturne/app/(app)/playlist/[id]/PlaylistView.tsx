@@ -70,6 +70,7 @@ export function PlaylistView({ playlist: initial, initialTracks, isOwner, tint }
 
   const remove = async (track: Track) => {
     const before = tracks;
+    const oldIndex = tracks.findIndex((t) => t.id === track.id);
     setTracks(removeTrack(tracks, track.id));
     const { error } = await sb.rpc('playlist_remove_track', { p_playlist: playlist.id, p_track: track.id });
     if (error) {
@@ -77,7 +78,22 @@ export function PlaylistView({ playlist: initial, initialTracks, isOwner, tint }
       toast('Could not remove the song. Try again.', { tone: 'error' });
       return;
     }
-    toast(`Removed from ${playlist.name}`);
+    toast(`Removed from ${playlist.name}`, {
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const added = await sb.rpc('playlist_add_track', { p_playlist: playlist.id, p_track: track.id });
+          const moved = added.error ? added : await sb.rpc('playlist_move_track', { p_playlist: playlist.id, p_track: track.id, p_to: oldIndex });
+          if (moved.error) {
+            toast('Could not put the song back. Add it again from search.', { tone: 'error' });
+            return;
+          }
+          setTracks(before);
+          toast(`Restored to ${playlist.name}`);
+          syncAfterChange();
+        },
+      },
+    });
     syncAfterChange();
   };
 
