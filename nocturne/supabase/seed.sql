@@ -7,7 +7,7 @@ insert into public.genres (id, name, color, sort_order) values
   ('synthwave', 'Synthwave', '#d1497a', 2),
   ('house', 'Deep House', '#2e6fd8', 3),
   ('piano', 'Piano & Keys', '#8a6d4b', 4),
-  ('chiptune', '8-bit', '#3fa34d', 5),
+  ('chiptune', '8-bit', '#2e8540', 5),
   ('downtempo', 'Downtempo', '#b5652b', 6),
   ('jazz', 'Late-night Jazz', '#a03f3f', 7);
 

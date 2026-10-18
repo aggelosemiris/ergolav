@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { getBrowserSupabase } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/Button';
 import { useLibrary } from '@/store/library';
+import { safeNext } from '@/lib/redirect';
 
 const email = z.string().trim().email('Enter a valid email address.');
 const loginSchema = z.object({ email, password: z.string().min(1, 'Enter your password.') });
@@ -16,12 +17,6 @@ const signupSchema = z.object({
   email,
   password: z.string().min(8, 'Use at least 8 characters for your password.').max(72, 'Passwords can be up to 72 characters.'),
 });
-
-/** Only same-site paths are allowed as a redirect target. */
-export function safeNext(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/';
-  return raw;
-}
 
 function friendly(message: string): string {
   const m = message.toLowerCase();

@@ -313,8 +313,9 @@ begin
   perform public.assert_playlist_owner(p_playlist);
   -- serialise concurrent appends to the same playlist
   perform 1 from public.playlists where id = p_playlist for update;
+  -- already there: not an error, the caller just learns nothing was added
   if exists (select 1 from public.playlist_tracks where playlist_id = p_playlist and track_id = p_track) then
-    raise exception 'track already in playlist' using errcode = '23505';
+    return null;
   end if;
   select coalesce(max(position) + 1, 0) into next_pos
   from public.playlist_tracks where playlist_id = p_playlist;
@@ -411,13 +412,13 @@ begin
                when tr.search_key like needle || '%' then 2
                when tr.search_key like '%' || needle || '%' then 1.5
                else 0 end
-          + extensions.similarity(tr.search_key, needle)
+          + extensions.word_similarity(needle, tr.search_key)
           + case when ar.search_key like '%' || needle || '%' then 0.8 else 0 end as score
         from public.tracks tr
         join public.artists ar on ar.id = tr.artist_id
         where tr.search_key like '%' || needle || '%'
            or ar.search_key like '%' || needle || '%'
-           or extensions.similarity(tr.search_key, needle) > 0.3
+           or extensions.word_similarity(needle, tr.search_key) > 0.45
         order by score desc, tr.play_count desc
         limit lim
       ) t), '[]'::jsonb),
@@ -428,9 +429,9 @@ begin
           case when ar.search_key = needle then 3
                when ar.search_key like needle || '%' then 2
                when ar.search_key like '%' || needle || '%' then 1.5
-               else 0 end + extensions.similarity(ar.search_key, needle) as score
+               else 0 end + extensions.word_similarity(needle, ar.search_key) as score
         from public.artists ar
-        where ar.search_key like '%' || needle || '%' or extensions.similarity(ar.search_key, needle) > 0.3
+        where ar.search_key like '%' || needle || '%' or extensions.word_similarity(needle, ar.search_key) > 0.45
         order by score desc
         limit lim
       ) a), '[]'::jsonb),
@@ -442,13 +443,13 @@ begin
                when alb.search_key like needle || '%' then 2
                when alb.search_key like '%' || needle || '%' then 1.5
                else 0 end
-          + extensions.similarity(alb.search_key, needle)
+          + extensions.word_similarity(needle, alb.search_key)
           + case when ar.search_key like '%' || needle || '%' then 0.8 else 0 end as score
         from public.albums alb
         join public.artists ar on ar.id = alb.artist_id
         where alb.search_key like '%' || needle || '%'
            or ar.search_key like '%' || needle || '%'
-           or extensions.similarity(alb.search_key, needle) > 0.3
+           or extensions.word_similarity(needle, alb.search_key) > 0.45
         order by score desc
         limit lim
       ) al), '[]'::jsonb),
@@ -459,9 +460,9 @@ begin
           case when p.search_key = needle then 3
                when p.search_key like needle || '%' then 2
                when p.search_key like '%' || needle || '%' then 1.5
-               else 0 end + extensions.similarity(p.search_key, needle) as score
+               else 0 end + extensions.word_similarity(needle, p.search_key) as score
         from public.playlists p
-        where p.search_key like '%' || needle || '%' or extensions.similarity(p.search_key, needle) > 0.3
+        where p.search_key like '%' || needle || '%' or extensions.word_similarity(needle, p.search_key) > 0.45
         order by score desc
         limit lim
       ) pl), '[]'::jsonb)

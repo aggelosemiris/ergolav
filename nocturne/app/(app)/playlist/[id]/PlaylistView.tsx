@@ -168,13 +168,10 @@ export function PlaylistView({ playlist: initial, initialTracks, isOwner, tint }
           <>
             <span className="font-bold">{playlist.ownerName}</span>
             <Dot />
-            <span data-testid="playlist-count">{pluralize(tracks.length, 'song')}</span>
-            {tracks.length > 0 && (
-              <>
-                <span>,</span>
-                <span className="text-muted">{formatTotalDuration(totalDurationMs(tracks))}</span>
-              </>
-            )}
+            <span data-testid="playlist-count">
+              {pluralize(tracks.length, 'song')}
+              {tracks.length > 0 && <span className="text-muted">, {formatTotalDuration(totalDurationMs(tracks))}</span>}
+            </span>
           </>
         }
       />

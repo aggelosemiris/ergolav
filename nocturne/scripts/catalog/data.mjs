@@ -7,7 +7,7 @@ export const GENRES = [
   { id: 'synthwave', name: 'Synthwave', color: '#d1497a' },
   { id: 'house', name: 'Deep House', color: '#2e6fd8' },
   { id: 'piano', name: 'Piano & Keys', color: '#8a6d4b' },
-  { id: 'chiptune', name: '8-bit', color: '#3fa34d' },
+  { id: 'chiptune', name: '8-bit', color: '#2e8540' },
   { id: 'downtempo', name: 'Downtempo', color: '#b5652b' },
   { id: 'jazz', name: 'Late-night Jazz', color: '#a03f3f' },
 ];

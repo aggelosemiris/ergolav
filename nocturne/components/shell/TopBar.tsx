@@ -98,7 +98,7 @@ export function TopBar({ scrollRoot }: { scrollRoot: React.RefObject<HTMLElement
     ]);
 
   return (
-    <div className={`sticky top-0 z-30 flex h-[var(--topbar-h)] items-center gap-3 px-4 transition-colors duration-200 sm:px-6 ${solid ? 'bg-surface/95 backdrop-blur' : 'bg-transparent'}`}>
+    <header className={`sticky top-0 z-30 flex h-[var(--topbar-h)] items-center gap-3 px-4 transition-colors duration-200 sm:px-6 ${solid ? 'bg-surface/95 backdrop-blur' : 'bg-transparent'}`}>
       <Link href="/" className="md:hidden" aria-label="Nocturne home">
         <Logo />
       </Link>
@@ -135,6 +135,6 @@ export function TopBar({ scrollRoot }: { scrollRoot: React.RefObject<HTMLElement
           </>
         )}
       </div>
-    </div>
+    </header>
   );
 }

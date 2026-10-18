@@ -40,6 +40,15 @@ interface LibraryState {
   logPlay: (trackId: string, context: { type: string; id: string | null } | null) => void;
 }
 
+// Bumped at the start and end of every write, so a load that overlapped a write knows its data is stale.
+let writeSeq = 0;
+const beginWrite = () => {
+  writeSeq++;
+};
+const endWrite = () => {
+  writeSeq++;
+};
+
 const emptyLibrary = {
   liked: new Set<string>(),
   ownPlaylists: [] as Playlist[],
@@ -78,6 +87,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     if (!user) return;
     set({ loading: true });
     const sb = getBrowserSupabase();
+    const seqAtStart = writeSeq;
     try {
       const [likes, own, savedPl, albums, artists] = await Promise.all([
         sb.from('liked_tracks').select('track_id').eq('user_id', user.id),
@@ -89,6 +99,11 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       const savedIds = (savedPl.data ?? []).map((r) => r.playlist_id as string);
       const saved = await getPlaylistsByIds(sb, savedIds);
       if (get().user?.id !== user.id) return; // signed out meanwhile
+      if (writeSeq !== seqAtStart) {
+        // a like/save happened while we were reading: our snapshot may predate it, read again
+        void get().load();
+        return;
+      }
       /* eslint-disable @typescript-eslint/no-explicit-any */
       const savedAlbums = (albums.data ?? []).map((r: any) => ({ ...mapAlbum(Array.isArray(r.album) ? r.album[0] : r.album), savedAt: r.saved_at }));
       const followed = (artists.data ?? []).map((r: any) => ({ ...mapArtist(Array.isArray(r.artist) ? r.artist[0] : r.artist), followedAt: r.followed_at }));
@@ -132,9 +147,10 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     if (wasLiked) optimistic.delete(track.id);
     else optimistic.add(track.id);
     set({ liked: optimistic });
-    const { error } = wasLiked
-      ? await sb.from('liked_tracks').delete().eq('user_id', user.id).eq('track_id', track.id)
-      : await sb.from('liked_tracks').upsert({ user_id: user.id, track_id: track.id }, { onConflict: 'user_id,track_id', ignoreDuplicates: true });
+    beginWrite();
+    const { error } = await Promise.resolve(wasLiked
+      ? sb.from('liked_tracks').delete().eq('user_id', user.id).eq('track_id', track.id)
+      : sb.from('liked_tracks').upsert({ user_id: user.id, track_id: track.id }, { onConflict: 'user_id,track_id', ignoreDuplicates: true })).finally(endWrite);
     if (error) {
       const rollback = new Set(get().liked);
       if (wasLiked) rollback.add(track.id);
@@ -151,11 +167,14 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     if (!user) return null;
     const sb = getBrowserSupabase();
     const finalName = name?.trim() || `My Playlist #${get().ownPlaylists.length + 1}`;
-    const { data, error } = await sb
+    beginWrite();
+    const { data, error } = await Promise.resolve(
+      sb
       .from('playlists')
       .insert({ owner_id: user.id, name: finalName.slice(0, 100), is_public: true })
-      .select('id, name, description, is_public, owner_id, created_at, updated_at')
-      .single();
+        .select('id, name, description, is_public, owner_id, created_at, updated_at')
+        .single(),
+    ).finally(endWrite);
     if (error || !data) {
       toast('Could not create the playlist. Try again.', { tone: 'error' });
       return null;
@@ -184,9 +203,9 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     let added = 0;
     let duplicates = 0;
     for (const t of tracks) {
-      const { error } = await sb.rpc('playlist_add_track', { p_playlist: playlistId, p_track: t.id });
-      if (!error) added++;
-      else if (error.code === '23505') duplicates++;
+      const { data, error } = await sb.rpc('playlist_add_track', { p_playlist: playlistId, p_track: t.id });
+      if (!error && data !== null) added++;
+      else if (!error) duplicates++;
       else {
         toast('Could not add to the playlist. Try again.', { tone: 'error' });
         return false;
@@ -211,9 +230,10 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       savedPlaylistIds: ids,
       savedPlaylists: saved ? get().savedPlaylists.filter((p) => p.id !== playlist.id) : [playlist, ...get().savedPlaylists],
     });
-    const { error } = saved
-      ? await sb.from('saved_playlists').delete().eq('user_id', user.id).eq('playlist_id', playlist.id)
-      : await sb.from('saved_playlists').insert({ user_id: user.id, playlist_id: playlist.id });
+    beginWrite();
+    const { error } = await Promise.resolve(saved
+      ? sb.from('saved_playlists').delete().eq('user_id', user.id).eq('playlist_id', playlist.id)
+      : sb.from('saved_playlists').insert({ user_id: user.id, playlist_id: playlist.id })).finally(endWrite);
     if (error) {
       toast('That did not save. Try again.', { tone: 'error' });
       void get().load();
@@ -234,9 +254,10 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       savedAlbumIds: ids,
       savedAlbums: saved ? get().savedAlbums.filter((a) => a.id !== album.id) : [{ ...album, savedAt: new Date().toISOString() }, ...get().savedAlbums],
     });
-    const { error } = saved
-      ? await sb.from('saved_albums').delete().eq('user_id', user.id).eq('album_id', album.id)
-      : await sb.from('saved_albums').insert({ user_id: user.id, album_id: album.id });
+    beginWrite();
+    const { error } = await Promise.resolve(saved
+      ? sb.from('saved_albums').delete().eq('user_id', user.id).eq('album_id', album.id)
+      : sb.from('saved_albums').insert({ user_id: user.id, album_id: album.id })).finally(endWrite);
     if (error) {
       toast('That did not save. Try again.', { tone: 'error' });
       void get().load();
@@ -259,9 +280,10 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
         ? get().followedArtists.filter((a) => a.id !== artist.id)
         : [{ ...artist, followedAt: new Date().toISOString() }, ...get().followedArtists],
     });
-    const { error } = following
-      ? await sb.from('followed_artists').delete().eq('user_id', user.id).eq('artist_id', artist.id)
-      : await sb.from('followed_artists').insert({ user_id: user.id, artist_id: artist.id });
+    beginWrite();
+    const { error } = await Promise.resolve(following
+      ? sb.from('followed_artists').delete().eq('user_id', user.id).eq('artist_id', artist.id)
+      : sb.from('followed_artists').insert({ user_id: user.id, artist_id: artist.id })).finally(endWrite);
     if (error) {
       toast('That did not save. Try again.', { tone: 'error' });
       void get().load();

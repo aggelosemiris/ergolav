@@ -57,7 +57,7 @@ export function TrackList({ tracks, context, showCover = true, showAlbum = false
 
   return (
     <div role="table" aria-label={label} className="select-none">
-      <div role="rowgroup" className="sticky top-0 z-10 -mx-2 hidden border-b border-white/10 bg-bg/95 px-2 backdrop-blur md:block">
+      <div role="rowgroup" className="sticky top-[var(--topbar-h)] z-20 -mx-2 hidden border-b border-white/10 bg-surface/95 px-2 backdrop-blur md:block">
         <div role="row" className={`grid ${cols} items-center gap-4 px-2 py-2 text-xs font-semibold tracking-wider text-subtle uppercase`}>
           <span role="columnheader" className="text-center">#</span>
           <span role="columnheader">Title</span>
@@ -107,6 +107,10 @@ export function TrackList({ tracks, context, showCover = true, showAlbum = false
                 setOverIndex(null);
               }}
               onDoubleClick={() => play(i)}
+              onClick={(e) => {
+                // touch screens have no hover or double-click: a tap on the row plays it
+                if (typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches && !(e.target as HTMLElement).closest('a, button')) play(i);
+              }}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter') {

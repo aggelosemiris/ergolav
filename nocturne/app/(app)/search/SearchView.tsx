@@ -259,7 +259,7 @@ function Browse({ genres }: { genres: Genre[] }) {
           </Link>
         ))}
       </div>
-      <p className="mt-8 text-sm text-subtle">
+      <p className="mt-8 hidden text-sm text-subtle md:block">
         Tip: press <kbd className="rounded bg-surface-3 px-1.5 py-0.5 font-sans text-xs text-text">/</kbd> anywhere to jump to search.
       </p>
     </section>

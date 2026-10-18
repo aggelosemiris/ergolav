@@ -35,7 +35,7 @@ function usePlayerShortcuts() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const mainRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   usePlayerShortcuts();
 
@@ -48,15 +48,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-dvh flex-col gap-2 md:p-2">
       <div className="flex min-h-0 flex-1 gap-2">
         <Sidebar />
-        <main
-          id="main"
+        <div
           ref={mainRef}
-          tabIndex={-1}
-          className="scroll-thin relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-bg pb-[calc(var(--player-h)+16px)] outline-none md:rounded-lg md:bg-surface md:pb-8"
+          className="scroll-thin relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-bg pb-[calc(var(--player-h)+16px)] md:rounded-lg md:bg-surface md:pb-8"
         >
           <TopBar scrollRoot={mainRef} />
-          <div className="px-4 sm:px-6">{children}</div>
-        </main>
+          <main id="main" tabIndex={-1} className="px-4 outline-none sm:px-6">
+            {children}
+          </main>
+        </div>
       </div>
       <PlayerBar />
       <MiniPlayer />
