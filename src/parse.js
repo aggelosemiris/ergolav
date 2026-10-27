@@ -76,25 +76,37 @@ function numAt(tokens, i){
 // Αριθμοί που περιγράφουν το προϊόν, όχι ποσότητα: διάσταση («30 επί 60», «30x60») ή μέγεθος («80 λίτρα», «60 εκ.»).
 // Τα «μέτρα», «τετραγωνικά», «τεμάχια», «σακιά» είναι μονάδες ποσότητας και δεν ανήκουν εδώ.
 const DIM_SEP = new Set(['επι', 'x', 'χ', '×', '*']);
-const SIZE_UNIT = new Set(['λιτρα', 'λιτρων', 'εκατοστα', 'εκ', 'ποντουσ', 'χιλιοστα', 'χιλ', 'ιντσεσ']);
+// Μονάδα μεγέθους → [είδος, εμφάνιση, συντελεστής προς λίτρα/εκατοστά].
+const SIZE_UNIT = {λιτρα:['vol','λ.',1], λιτρων:['vol','λ.',1], εκατοστα:['len','εκ.',1], εκ:['len','εκ.',1], ποντουσ:['len','εκ.',1],
+  χιλιοστα:['len','χιλ.',0.1], χιλ:['len','χιλ.',0.1], ιντσεσ:['len','ίντσες',2.54]};
 const fmtNum = n => String(n).replace('.', ',');
+const dimSize = (at, a, b) => ({at, kind:'dim', value:[a, b].sort((x, y) => x - y).join('×'), label:`${fmtNum(a)}×${fmtNum(b)}`});
 
-/** Θέσεις των tokens που είναι χαρακτηριστικά (δεν γίνονται ποσότητα) και οι διαστάσεις που ειπώθηκαν. */
+/** Θέσεις των tokens που είναι χαρακτηριστικά (δεν γίνονται ποσότητα) και τα μεγέθη που ειπώθηκαν. */
 function attributes(tokens){
-  const at = new Set(), dims = [];
+  const at = new Set(), sizes = [];
   for(let i = 0; i < tokens.length; i++){
     const x = tokens[i].match(/^(\d+(?:[.,]\d+)?)[xχ×*](\d+(?:[.,]\d+)?)$/);
-    if(x){ at.add(i); dims.push({at: i, label: `${x[1]}×${x[2]}`}); continue; }
+    if(x){ at.add(i); sizes.push(dimSize(i, ...[x[1], x[2]].map(v => parseFloat(v.replace(',', '.'))))); continue; }
     const a = numAt(tokens, i);
     if(!a) continue;
     const b = DIM_SEP.has(tokens[a.end + 1]) ? numAt(tokens, a.end + 2) : null;
-    const last = b ? b.end : SIZE_UNIT.has((tokens[a.end + 1] || '').replace(/\.$/, '')) ? a.end + 1 : -1;
+    const u = SIZE_UNIT[(tokens[a.end + 1] || '').replace(/\.$/, '')];
+    const last = b ? b.end : u ? a.end + 1 : -1;
     if(last < 0) continue;
     for(let k = i; k <= last; k++) at.add(k);
-    if(b) dims.push({at: i, label: `${fmtNum(a.n)}×${fmtNum(b.n)}`});
+    sizes.push(b ? dimSize(i, a.n, b.n) : {at: i, kind: u[0], value: Math.round(a.n * u[2] * 100) / 100, label: `${fmtNum(a.n)} ${u[1]}`});
     i = last;
   }
-  return {at, dims};
+  return {at, sizes};
+}
+
+/** Μέγεθος στο όνομα του είδους του καταλόγου («Θερμοσίφωνας 80 λ.», «Ντουζιέρα 80×80»)· null αν δεν έχει. */
+function catalogSize(name){
+  const d = name.match(/(\d+(?:,\d+)?)×(\d+(?:,\d+)?)/);
+  if(d) return {...dimSize(-1, ...[d[1], d[2]].map(v => parseFloat(v.replace(',', '.')))), label: d[0]};
+  const m = name.match(/(\d+(?:,\d+)?)\s?(λ|εκ)\./);
+  return m ? {kind: m[2] === 'λ' ? 'vol' : 'len', value: parseFloat(m[1].replace(',', '.')), label: m[0]} : null;
 }
 
 // Keywords σε φωνητική μορφή (υπολογίζονται μία φορά).
@@ -206,10 +218,10 @@ export function parse(text){
     // Υλικό που το περιέχει ήδη άλλο υλικό της ίδιας φράσης («νιπτήρας με έπιπλο») δεν χρεώνεται χωριστά.
     const included = new Set(items.flatMap((it, k) =>
       it && !tokens.slice(Math.max(0, k - 3), k).some(t => NEG.has(t)) ? it.includes || [] : []));
-    // Διάσταση για το υλικό στη θέση i: όσες ειπώθηκαν μέχρι το επόμενο υλικό, αλλιώς από το προηγούμενο ως εδώ.
-    const dimFor = i => {
+    // Μέγεθος για το υλικό στη θέση i: όσα ειπώθηκαν μέχρι το επόμενο υλικό, αλλιώς από το προηγούμενο ως εδώ.
+    const sizeFor = (i, list) => {
       const prev = items.findLastIndex((it, k) => it && k < i), next = items.findIndex((it, k) => it && k > i);
-      return (attr.dims.find(d => d.at > i && (next < 0 || d.at < next)) ?? attr.dims.findLast(d => d.at < i && d.at > prev))?.label;
+      return list.find(d => d.at > i && (next < 0 || d.at < next)) ?? list.findLast(d => d.at < i && d.at > prev);
     };
     if(tokens.some(t => CORR.has(t))) correcting = true;
     const corrHere = tokens.some(t => CORR_EXPLICIT.has(t)), corrNear = corrHere || prevCorr;
@@ -256,11 +268,15 @@ export function parse(text){
       saidQty.set(item, saidQty.get(item) || !qtyMissing);
       const qty = pending ?? 1;
       pending = null;
-      const line = makeLine(item, qty, tokens, qtyMissing, item.sizeInName ? dimFor(i) : undefined);
-      const same = lines.find(l => l.id === line.id && (l.name === line.name || correcting) && !l.flag && !line.flag);
+      const line = makeLine(item, qty, tokens, qtyMissing, item.sizeInName ? sizeFor(i, attr.sizes.filter(d => d.kind === 'dim'))?.label : undefined);
+      // Είπε άλλο μέγεθος από αυτό του καταλόγου («θερμοσίφωνας 120 λίτρα» ≠ 80 λ.) → ρωτάμε, όχι σιωπηλά άλλο είδος.
+      const said = sizeFor(i, attr.sizes), cs = catalogSize(item.name);
+      if(said && cs && (said.kind !== cs.kind || said.value !== cs.value)) line.sizeCheck = {said: said.label, cat: cs.label};
+      const same = lines.find(l => l.id === line.id && (l.name === line.name || correcting) && !l.flag && !line.flag &&
+        (correcting || (!l.sizeCheck && !line.sizeCheck)));
       if(same && correcting){
         // Διόρθωση: η νέα αναφορά αντικαθιστά την παλιά (ποσότητα και τύπο).
-        Object.assign(same, {...line, qtyMissing: line.qtyMissing});
+        Object.assign(same, {...line, qtyMissing: line.qtyMissing, sizeCheck: line.sizeCheck});
         correcting = false;
         lastLine = same;
       } else if(same){

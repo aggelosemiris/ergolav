@@ -268,3 +268,25 @@ test('«δύο νιπτήρες με έπιπλο» → ένα έπιπλο, α�
   assert.equal(byId(parse('δύο έπιπλα με νιπτήρα'), 'vanity')[0].qty, 2);
   assert.equal(byId(parse('δύο έπιπλα με νιπτήρα'), 'vanity')[0].qtyMissing, undefined);
 });
+
+// ── Μέγεθος που είπε ο χρήστης ≠ μέγεθος του είδους στον κατάλογο → η γραμμή ρωτάει ──
+test('άλλο μέγεθος από τον κατάλογο → ρωτάει (όχι σιωπηλά άλλο είδος)', () => {
+  assert.deepEqual(byId(parse('θερμοσίφωνας 120 λίτρα'), 'heater')[0].sizeCheck, {said: '120 λ.', cat: '80 λ.'});
+  assert.deepEqual(byId(parse('έπιπλο 60 εκατοστά'), 'vanity')[0].sizeCheck, {said: '60 εκ.', cat: '80 εκ.'});
+  assert.deepEqual(byId(parse('ντουζιέρα 90 επί 90'), 'shower')[0].sizeCheck, {said: '90×90', cat: '80×80'});
+});
+
+test('ίδιο μέγεθος με τον κατάλογο → δεν ρωτάει', () => {
+  assert.ok(!byId(parse('θερμοσίφωνας 80 λίτρα'), 'heater')[0].sizeCheck);
+  assert.ok(!byId(parse('έπιπλο μπάνιου 80 εκατοστά'), 'vanity')[0].sizeCheck);
+  assert.ok(!byId(parse('έπιπλο 800 χιλιοστά'), 'vanity')[0].sizeCheck, '800 χιλ. = 80 εκ.');
+  assert.ok(!byId(parse('ντουζιέρα 80x80'), 'shower')[0].sizeCheck);
+  assert.ok(!byId(parse('θερμοσίφωνας'), 'heater')[0].sizeCheck, 'χωρίς μέγεθος: όπως πριν');
+  assert.ok(!byId(parse('πλακάκι 30 επί 60 15 τετραγωνικά'), 'tile')[0].sizeCheck, 'το πλακάκι δεν έχει μέγεθος στον κατάλογο');
+});
+
+test('μέγεθος: διόρθωση καθαρίζει την ερώτηση, διαφορετικά μεγέθη δεν ενώνονται', () => {
+  assert.ok(!byId(parse('θερμοσίφωνας 120 λίτρα, όχι, θερμοσίφωνας 80 λίτρα'), 'heater')[0].sizeCheck);
+  const two = byId(parse('θερμοσίφωνας 80 λίτρα. θερμοσίφωνας 120 λίτρα'), 'heater');
+  assert.deepEqual(two.map(l => [l.qty, !!l.sizeCheck]), [[1, false], [1, true]]);
+});

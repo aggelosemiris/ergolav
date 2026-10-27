@@ -236,6 +236,25 @@ await dictate(p, 'ένα κλιματιστικό και δύο ρίζες');
 await p.click('#ctaBtn');
 ok('#C αν δεν βρεθεί τίποτα από τον κατάλογο: μήνυμα, και μένεις στο κείμενο (όχι οθόνη ελέγχου)', await p.isVisible('#s-listen.on') && !(await p.isVisible('#s-lines.on')) && /κανένα υλικό από τον κατάλογο/.test(await p.textContent('#notice')), await p.textContent('#notice'));
 
+// ── Μέγεθος ≠ κατάλογος: η γραμμή ρωτάει και κλειδώνει το κουμπί ──
+await p.goto('http://localhost:8080/');
+await dictate(p, 'θερμοσίφωνας 120 λίτρα και θερμοσίφωνας 80 λίτρα');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+const big = p.locator('.ln.flag:has-text("Είπες 120 λ.")');
+ok('#S «Είπες 120 λ. — ο κατάλογος έχει 80 λ. Έλεγξε την τιμή»', await big.count() === 1 && /Είπες 120 λ\. — ο κατάλογος έχει 80 λ\. Έλεγξε την τιμή/.test(await big.textContent()));
+ok('#S ίδιο μέγεθος (80 λίτρα) δεν ρωτάει', await p.locator('.ln:has-text("Είπες 80")').count() === 0 && await p.locator('.ln:not(.flag):has-text("Θερμοσίφωνας 80 λ.")').count() === 1);
+ok('#S το κουμπί μένει κλειδωμένο', await p.locator('#ctaBtn').isDisabled() && /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
+await big.locator('[data-a="size-cat"]').click();
+ok('#S «Κράτα 80 λ.» → επιβεβαιώνεται και ξεκλειδώνει', await p.locator('.ln.flag').count() === 0 && await p.locator('#ctaBtn').isEnabled());
+await p.goto('http://localhost:8080/');
+await dictate(p, 'έπιπλο 60 εκατοστά');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+await p.locator('[data-a="size-said"]').click();
+ok('#S «Βάλε 60 εκ.» → αλλάζει το όνομα και ζητά τιμή με το χέρι (κουμπί κλειδωμένο)', /Έπιπλο μπάνιου με νιπτήρα 60 εκ\./.test(await p.textContent('#lines')) && await p.locator('[data-p="cmat"]').isVisible() && await p.locator('#ctaBtn').isDisabled());
+await p.locator('[data-p="cmat"]').fill('250');
+await p.locator('.custom [data-a="keep"]').click();
+ok('#S με τη δική του τιμή ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled() && /250,00/.test(await p.textContent('#lines')));
+
 // ── Πληκτρολόγιο: γράφω / διορθώνω το κείμενο ──
 await p.goto('http://localhost:8080/');
 await p.click('#mic');                                            // χωρίς φωνή (headless) → ανοίγει κατευθείαν για γράψιμο
