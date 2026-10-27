@@ -376,7 +376,7 @@ function renderLines(){
         </div>
         ${T ? `
         <div class="tiers" role="group" aria-label="Τιμή υλικού ανά ${per}">
-          ${[['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']].map(([t, n]) => `
+          ${(l.sizeSaid ? [] : [['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']]).map(([t, n]) => `
           <button class="tier${cur === t ? ' on' : ''}" data-t="${t}" aria-pressed="${cur === t}"><span>${n}</span><span class="num">${eur(T[t])}<small>/${per}</small></span></button>`).join('')}
           <button class="tier${cur === 'custom' || l.tier === 'custom' ? ' on' : ''}" data-t="custom" aria-pressed="${cur === 'custom'}"><span>Άλλη τιμή</span><span class="num">${l.tier === 'custom' && !l.customOpen ? `${eur(l.mat)}<small>/${per}</small>` : '…'}</span></button>
         </div>
@@ -390,9 +390,11 @@ function renderLines(){
         </div>` : ''}` : ''}`;
       if(l.sizeCheck){
         el.querySelector('[data-a="size-cat"]').onclick = () => { l.sizeCheck = null; checkedCount++; renderLines(); };
-        // Άλλο μέγεθος = άλλο είδος: παίρνει το όνομα που ειπώθηκε, χωρίς κωδικό καταλόγου, και η τιμή γράφεται με το χέρι.
+        // Άλλο μέγεθος = άλλο είδος: παίρνει το όνομα που ειπώθηκε, χωρίς κωδικό καταλόγου, και η τιμή γράφεται με το χέρι
+        // (οι προτάσεις τιμής του καταλόγου κρύβονται — είναι για το άλλο μέγεθος).
         el.querySelector('[data-a="size-said"]').onclick = () => {
-          Object.assign(l, {name: l.name.replace(l.sizeCheck.cat, l.sizeCheck.said), code: '', sizeCheck: null, customOpen: true, focusCustom: true});
+          Object.assign(l, {sizeSaid: {name: l.name, code: l.code, sizeCheck: l.sizeCheck},
+            name: l.name.replace(l.sizeCheck.cat, l.sizeCheck.said), code: '', sizeCheck: null, customOpen: true, focusCustom: true});
           checkedCount++; renderLines();
         };
       }
@@ -424,7 +426,12 @@ function renderLines(){
           remember(key, cents);
           checkedCount++; renderLines();
         };
-        el.querySelector('[data-a="cancel"]').onclick = () => { Object.assign(l, {customOpen: false, customDraft: ''}); renderLines(); };
+        el.querySelector('[data-a="cancel"]').onclick = () => {
+          Object.assign(l, {customOpen: false, customDraft: ''});
+          // «Βάλε 120 λ.» χωρίς δική του τιμή → πίσω στην ερώτηση (ποτέ όνομα 120 λ. με τιμή του 80 λ.).
+          if(l.sizeSaid && l.tier !== 'custom'){ Object.assign(l, l.sizeSaid); l.sizeSaid = null; }
+          renderLines();
+        };
         if(l.focusCustom){ l.focusCustom = false; setTimeout(() => input.focus(), 0); }
       }
     }

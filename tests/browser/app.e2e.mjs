@@ -251,9 +251,19 @@ await dictate(p, 'έπιπλο 60 εκατοστά');
 await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
 await p.locator('[data-a="size-said"]').click();
 ok('#S «Βάλε 60 εκ.» → αλλάζει το όνομα και ζητά τιμή με το χέρι (κουμπί κλειδωμένο)', /Έπιπλο μπάνιου με νιπτήρα 60 εκ\./.test(await p.textContent('#lines')) && await p.locator('[data-p="cmat"]').isVisible() && await p.locator('#ctaBtn').isDisabled());
+ok('#S μετά το «Βάλε» δεν προτείνονται τιμές του καταλόγου (είναι για 80 εκ.)', await p.locator('.tier[data-t="normal"], .tier[data-t="eco"], .tier[data-t="premium"]').count() === 0);
+await p.locator('.custom [data-a="cancel"]').click();
+ok('#S «Άκυρο» χωρίς τιμή → πίσω στην ερώτηση: όνομα 80 εκ., ξανά οι δύο επιλογές, κουμπί κλειδωμένο',
+  await p.locator('.ln.flag:has-text("Είπες 60 εκ.")').count() === 1 && /Έπιπλο μπάνιου με νιπτήρα 80 εκ\./.test(await p.textContent('#lines')) && !/60 εκ\./.test(await p.textContent(".ln-name")) &&
+  await p.locator('[data-a="size-cat"]').isVisible() && await p.locator('[data-a="size-said"]').isVisible() && await p.locator('#ctaBtn').isDisabled(),
+  await p.textContent('#lines'));
+await p.locator('[data-a="size-said"]').click();
 await p.locator('[data-p="cmat"]').fill('250');
 await p.locator('.custom [data-a="keep"]').click();
 ok('#S με τη δική του τιμή ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled() && /250,00/.test(await p.textContent('#lines')));
+await p.locator('.tier[data-t="custom"]').click();
+await p.locator('.custom [data-a="cancel"]').click();
+ok('#S αφού έχει δική του τιμή, «Άκυρο» την κρατά (60 εκ., 250,00 €)', await p.locator('#ctaBtn').isEnabled() && /60 εκ\./.test(await p.textContent('.ln-name')) && /250,00/.test(await p.textContent('#lines')));
 
 // ── Πληκτρολόγιο: γράφω / διορθώνω το κείμενο ──
 await p.goto('http://localhost:8080/');
