@@ -10,6 +10,9 @@ import { makePdf, shareFile, download } from './share.js';
 import { parseAmount, toCents, formatEur, formatQty } from './number.js';
 import { tiers, priceKey, history, remember, ageLabel, isStale } from './prices.js';
 
+// Πιλοτικό: δεν στέλνουμε φωτογραφίες σε τρίτους. Με true ξανανοίγει η ροή φωτογραφίας (κουμπί, κάλυψη, key).
+const PHOTO_ENABLED = false;
+
 const SAMPLE = 'Ανακαίνιση μπάνιου. Δώδεκα μέτρα σωλήνα πολυστρωματικό, μια μπαταρία νιπτήρα, λεκάνη κρεμαστή με καζανάκι εντοιχισμού, και δώδεκα τετραγωνικά πλακάκι τοίχου.';
 const BARS = 18;
 
@@ -139,11 +142,12 @@ if(!micSupported) $('micNote').textContent = 'Ο browser σου δεν έχει 
 const shot = $('shot');
 let pendingPhoto = null;
 
-$('photo').onclick = () => getKey() ? $('photoInput').click() : openKey();
+$('photo').hidden = !PHOTO_ENABLED;
+$('photo').onclick = () => { if(PHOTO_ENABLED) getKey() ? $('photoInput').click() : openKey(); };
 $('photoInput').onchange = async e => {
   const file = e.target.files[0];
   e.target.value = '';
-  if(!file) return;
+  if(!file || !PHOTO_ENABLED) return;
   started = Date.now();
   let img;
   try {
@@ -197,6 +201,7 @@ async function openRedact(img){
 }
 
 async function readPhoto(img){
+  if(!PHOTO_ENABLED) return;
   show('s-listen','Διαβάζω');
   notice(''); wave.hidden = true; $('listenAlt').hidden = true; $('chips').replaceChildren();
   shot.src = img.url; shot.hidden = false; shot.classList.add('reading');
@@ -223,11 +228,12 @@ async function readPhoto(img){
 
 $('changeKey').onclick = () => openKey();
 // Πάντα διαθέσιμη πρόσβαση στο key (αλλαγή/διαγραφή), ακόμα κι όταν η φωτογραφία ανοίγει κατευθείαν την κάμερα.
-const syncKeyUi = () => { $('keySettings').hidden = !getKey(); };
+const syncKeyUi = () => { $('keySettings').hidden = !PHOTO_ENABLED || !getKey(); };
 $('keySettings').onclick = () => openKey();
 syncKeyUi();
 
 function openKey(msg){
+  if(!PHOTO_ENABLED) return;
   $('keyError').hidden = !msg; $('keyError').textContent = msg || '';
   $('keyInput').value = '';
   $('keyInput').type = 'password'; $('keyShow').textContent = 'Εμφάνιση'; $('keyShow').setAttribute('aria-pressed', 'false');

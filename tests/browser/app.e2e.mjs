@@ -11,10 +11,11 @@ p.on('pageerror', e => errs.push(e.message));
 p.on('console', m => { if(/Content Security Policy|Refused to/i.test(m.text())) csp.push(m.text().slice(0, 160)); });
 p.on('request', r => { const u = new URL(r.url()); if(!/^(localhost|127\.0\.0\.1)$/.test(u.hostname)) external.push(u.hostname); });
 let gemBody = null, claudeBody = null;
+const NOTES = '2 τεμάχια κλιματιστικά\n999 λεκάνες κρεμαστές\nλεκάνη κρεμαστή';   // ό,τι «διαβάζει» η φωτογραφία
 await p.route('https://generativelanguage.googleapis.com/**', async r => {
   gemBody = JSON.parse(r.request().postData());
   await r.fulfill({headers:{'access-control-allow-origin':'*'}, contentType:'application/json',
-    body: JSON.stringify({candidates:[{finishReason:'STOP', content:{parts:[{text:'2 τεμάχια κλιματιστικά\n999 λεκάνες κρεμαστές\nλεκάνη κρεμαστή'}]}}]})});
+    body: JSON.stringify({candidates:[{finishReason:'STOP', content:{parts:[{text: NOTES}]}}]})});
 });
 await p.route('https://api.anthropic.com/**', async r => {
   claudeBody = JSON.parse(r.request().postData());
@@ -37,30 +38,49 @@ const ok = (name, cond, detail='') => { results.push({name, pass: !!cond}); cons
 await p.goto('http://localhost:8080/');
 await p.evaluate(() => localStorage.clear()); await p.reload();
 
-// #1 key: κρυφό, εμφάνιση, όχι αποθήκευση εξ ορισμού
-await p.click('#photo');
-ok('#1 πεδίο key κρυφό (password)', await p.getAttribute('#keyInput', 'type') === 'password');
-await p.fill('#keyInput', 'AIza' + 'B'.repeat(35));
-await p.click('#keyShow');
-ok('#1 κουμπί εμφάνισης', await p.getAttribute('#keyInput', 'type') === 'text');
-ok('#1 «θυμήσου» εξ ορισμού ΟΧΙ', !(await p.isChecked('#keyRemember')));
-ok('#2 κείμενο: Anthropic όχι δωρεάν', /Όχι δωρεάν/.test(await p.textContent('#keySheet')));
-const [ch] = await Promise.all([p.waitForEvent('filechooser'), p.click('#keySave')]);
-ok('#1 key ΔΕΝ γράφτηκε στο localStorage', await p.evaluate(() => Object.keys(localStorage).filter(k => /key/i.test(k)).length === 0));
+// Φωτογραφία: κλειστή στο πιλοτικό (PHOTO_ENABLED = false στο src/app.js). Οι έλεγχοί της τρέχουν όταν ξανανοίξει.
+const PHOTO_ON = await p.isVisible('#photo');
+if(PHOTO_ON){
+  // #1 key: κρυφό, εμφάνιση, όχι αποθήκευση εξ ορισμού
+  await p.click('#photo');
+  ok('#1 πεδίο key κρυφό (password)', await p.getAttribute('#keyInput', 'type') === 'password');
+  await p.fill('#keyInput', 'AIza' + 'B'.repeat(35));
+  await p.click('#keyShow');
+  ok('#1 κουμπί εμφάνισης', await p.getAttribute('#keyInput', 'type') === 'text');
+  ok('#1 «θυμήσου» εξ ορισμού ΟΧΙ', !(await p.isChecked('#keyRemember')));
+  ok('#2 κείμενο: Anthropic όχι δωρεάν', /Όχι δωρεάν/.test(await p.textContent('#keySheet')));
+  const [ch] = await Promise.all([p.waitForEvent('filechooser'), p.click('#keySave')]);
+  ok('#1 key ΔΕΝ γράφτηκε στο localStorage', await p.evaluate(() => Object.keys(localStorage).filter(k => /key/i.test(k)).length === 0));
 
-// #3 οθόνη «Πριν σταλεί» με κάλυψη
-await ch.setFiles(PHOTO);
-await p.waitForSelector('#s-redact.on');
-ok('#3 οθόνη «Πριν σταλεί» πριν από την αποστολή', gemBody === null, 'καμία κλήση ακόμα');
-ok('#3 σημείωση απορρήτου για Google', /Google.*δωρεάν.*άνθρωποι/s.test(await p.textContent('#privacyNote')));
-const box = await p.locator('#redactCanvas').boundingBox();
-await p.mouse.move(box.x + 20, box.y + 20); await p.mouse.down(); await p.mouse.move(box.x + box.width - 20, box.y + 120, {steps: 5}); await p.mouse.up();
-// Δείγμα στη μέση της συρμένης περιοχής (CSS y = 70), μετατρεμμένο σε pixels του canvas.
-const black = await p.evaluate(cssY => { const c = document.getElementById('redactCanvas'); const y = Math.floor(cssY * c.height / c.getBoundingClientRect().height); const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), y, 1, 1).data; return d[0] + d[1] + d[2]; }, 70);
-ok('#3 η κάλυψη ζωγραφίζεται πάνω στην εικόνα', black === 0);
-await p.click('#ctaBtn');
-await p.waitForSelector('#s-lines.on');
-ok('#3 στάλθηκε η καλυμμένη εικόνα', !!gemBody && gemBody.contents[0].parts[0].inline_data.data.length > 1000);
+  // #3 οθόνη «Πριν σταλεί» με κάλυψη
+  await ch.setFiles(PHOTO);
+  await p.waitForSelector('#s-redact.on');
+  ok('#3 οθόνη «Πριν σταλεί» πριν από την αποστολή', gemBody === null, 'καμία κλήση ακόμα');
+  ok('#3 σημείωση απορρήτου για Google', /Google.*δωρεάν.*άνθρωποι/s.test(await p.textContent('#privacyNote')));
+  const box = await p.locator('#redactCanvas').boundingBox();
+  await p.mouse.move(box.x + 20, box.y + 20); await p.mouse.down(); await p.mouse.move(box.x + box.width - 20, box.y + 120, {steps: 5}); await p.mouse.up();
+  // Δείγμα στη μέση της συρμένης περιοχής (CSS y = 70), μετατρεμμένο σε pixels του canvas.
+  const black = await p.evaluate(cssY => { const c = document.getElementById('redactCanvas'); const y = Math.floor(cssY * c.height / c.getBoundingClientRect().height); const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), y, 1, 1).data; return d[0] + d[1] + d[2]; }, 70);
+  ok('#3 η κάλυψη ζωγραφίζεται πάνω στην εικόνα', black === 0);
+  await p.click('#ctaBtn');
+  await p.waitForSelector('#s-lines.on');
+  ok('#3 στάλθηκε η καλυμμένη εικόνα', !!gemBody && gemBody.contents[0].parts[0].inline_data.data.length > 1000);
+} else {
+  ok('πιλοτικό: το κουμπί φωτογραφίας ΔΕΝ φαίνεται', !(await p.isVisible('#photo')));
+  const chooser = p.waitForEvent('filechooser', {timeout: 1000}).then(() => true, () => false);
+  await p.evaluate(() => document.getElementById('photo').click());
+  ok('πιλοτικό: ούτε με click από κώδικα ανοίγει κάμερα ή παράθυρο key', !(await chooser) && !(await p.isVisible('#keySheet.on')));
+  await p.setInputFiles('#photoInput', PHOTO);
+  await p.waitForTimeout(500);
+  ok('πιλοτικό: αρχείο στο κρυφό input δεν ανοίγει την οθόνη κάλυψης', await p.isVisible('#s-start.on') && !(await p.isVisible('#s-redact.on')));
+  await p.evaluate(() => localStorage.setItem('ergolav.apiKey', 'AIza' + 'B'.repeat(35))); await p.reload();
+  ok('πιλοτικό: με αποθηκευμένο key δεν φαίνεται ο σύνδεσμος «Κλειδί ανάγνωσης»', !(await p.isVisible('#keySettings')));
+  await p.evaluate(() => localStorage.clear()); await p.reload();
+  // Οι υπόλοιποι έλεγχοι (τιμές, εργασία, ΦΠΑ, PDF) με το ίδιο κείμενο, γραμμένο αντί για φωτογραφημένο.
+  await dictate(p, NOTES);
+  await p.click('#ctaBtn');
+  await p.waitForSelector('#s-lines.on');
+}
 
 // Στην προετοιμασία της προσφοράς μπαίνουν ΜΟΝΟ υλικά του καταλόγου: το «κλιματιστικά» (και ό,τι δεν υπάρχει) δεν φαίνεται πουθενά
 ok('#C είδος εκτός καταλόγου: δεν υπάρχει ούτε ως κάρτα (ούτε «δεν μπαίνει»)', !/Κλιματιστικ|δεν μπαίνει|Δεν υπάρχει στον κατάλογο/.test(await p.textContent('#lines')), (await p.textContent('#lines')).slice(0, 80));
@@ -163,30 +183,32 @@ if(process.env.SHOT_DIR) await p.locator('#pdf').screenshot({path: process.env.S
 await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000}).catch(() => {});
 ok('#5 PDF φτιάχνεται με ενεργή CSP', await p.textContent('#ctaBtn') === 'Στείλε στον πελάτη', await p.textContent('#ctaBtn'));
 
-// #1 «θυμήσου» + «ξέχασε»
-await p.goto('http://localhost:8080/');
-await p.click('#photo');
-await p.fill('#keyInput', 'sk-ant-' + 'x'.repeat(40));
-await p.check('#keyRemember');
-const [ch2] = await Promise.all([p.waitForEvent('filechooser'), p.click('#keySave')]);
-ok('#1 με «θυμήσου» αποθηκεύεται', await p.evaluate(() => !!localStorage.getItem('ergolav.apiKey')));
-// #2 Claude: μοντέλο + SDK τοπικά
-await ch2.setFiles(PHOTO);
-await p.waitForSelector('#s-redact.on');
-ok('#3 σημείωση απορρήτου για Anthropic', /Anthropic/.test(await p.textContent('#privacyNote')));
-await p.click('#ctaBtn');
-await p.waitForSelector('#s-lines.on', {timeout: 20000}).catch(() => {});
-ok('#2 Claude μοντέλο claude-sonnet-5-5', claudeBody?.model === 'claude-sonnet-5-5', claudeBody?.model);
-ok('#2 fallbacks/effort στο αίτημα', claudeBody?.fallbacks === 'default' && claudeBody?.output_config?.effort === 'low');
-await p.goto('http://localhost:8080/');
-ok('#1 σύνδεσμος «Κλειδί ανάγνωσης» στην αρχική', await p.isVisible('#keySettings'));
-await p.click('#keySettings');
-ok('#1 «Ξέχασε το key» εμφανίζεται', await p.isVisible('#keyForget'));
-await p.click('#keyForget');
-ok('#1 «Ξέχασε» σβήνει το key', await p.evaluate(() => !localStorage.getItem('ergolav.apiKey')));
-ok('#1 μετά το «Ξέχασε» ζητάει ξανά key', (await p.click('#photo'), await p.isVisible('#keySheet.on')));
-await p.goto('http://localhost:8080/');
-ok('#1 μετά από reload δεν υπάρχει key', !(await p.isVisible('#keySettings')));
+if(PHOTO_ON){
+  // #1 «θυμήσου» + «ξέχασε»
+  await p.goto('http://localhost:8080/');
+  await p.click('#photo');
+  await p.fill('#keyInput', 'sk-ant-' + 'x'.repeat(40));
+  await p.check('#keyRemember');
+  const [ch2] = await Promise.all([p.waitForEvent('filechooser'), p.click('#keySave')]);
+  ok('#1 με «θυμήσου» αποθηκεύεται', await p.evaluate(() => !!localStorage.getItem('ergolav.apiKey')));
+  // #2 Claude: μοντέλο + SDK τοπικά
+  await ch2.setFiles(PHOTO);
+  await p.waitForSelector('#s-redact.on');
+  ok('#3 σημείωση απορρήτου για Anthropic', /Anthropic/.test(await p.textContent('#privacyNote')));
+  await p.click('#ctaBtn');
+  await p.waitForSelector('#s-lines.on', {timeout: 20000}).catch(() => {});
+  ok('#2 Claude μοντέλο claude-sonnet-5-5', claudeBody?.model === 'claude-sonnet-5-5', claudeBody?.model);
+  ok('#2 fallbacks/effort στο αίτημα', claudeBody?.fallbacks === 'default' && claudeBody?.output_config?.effort === 'low');
+  await p.goto('http://localhost:8080/');
+  ok('#1 σύνδεσμος «Κλειδί ανάγνωσης» στην αρχική', await p.isVisible('#keySettings'));
+  await p.click('#keySettings');
+  ok('#1 «Ξέχασε το key» εμφανίζεται', await p.isVisible('#keyForget'));
+  await p.click('#keyForget');
+  ok('#1 «Ξέχασε» σβήνει το key', await p.evaluate(() => !localStorage.getItem('ergolav.apiKey')));
+  ok('#1 μετά το «Ξέχασε» ζητάει ξανά key', (await p.click('#photo'), await p.isVisible('#keySheet.on')));
+  await p.goto('http://localhost:8080/');
+  ok('#1 μετά από reload δεν υπάρχει key', !(await p.isVisible('#keySettings')));
+}
 
 // ── Β. γραμμή μόνο εργασίας + νέα ανάλυση μηδενίζει την εργασία ──
 await p.goto('http://localhost:8080/');
@@ -253,6 +275,7 @@ await p2.click('#ctaBtn'); await p2.waitForSelector('#s-lines.on');
 ok('#K και τα δύο υλικά μπήκαν', await p2.locator('.ln:has-text("Πρίζα")').count() === 1 && await p2.locator('.ln:has-text("σποτ")').count() === 1);
 await p2.close();
 
+ok('#5 κανένα αίτημα σε API τρίτου όσο η φωτογραφία είναι κλειστή', PHOTO_ON || (gemBody === null && claudeBody === null));
 ok('#5 κανένα script/αίτημα σε τρίτο domain εκτός API', external.every(h => /generativelanguage|api\.anthropic|fonts\.g/.test(h)), [...new Set(external)].join(', '));
 ok('#5 καμία παραβίαση CSP', csp.length === 0, csp.join(' | '));
 ok('καμία JS εξαίρεση', errs.length === 0, errs.join(' | '));

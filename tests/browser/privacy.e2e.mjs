@@ -67,41 +67,49 @@ await p.route('https://generativelanguage.googleapis.com/**', async r => {
 });
 await p.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
 await p.goto(BASE);
-await p.click('#photo');
-await p.fill('#keyInput', 'AIza' + 'P'.repeat(35));
-const [chooser] = await Promise.all([p.waitForEvent('filechooser'), p.click('#keySave')]);
-await chooser.setFiles(fs.realpathSync(tmp));
-await p.waitForSelector('#s-redact.on');
+// Φωτογραφία κλειστή στο πιλοτικό (PHOTO_ENABLED = false): τίποτα δεν πρέπει να φύγει. Οι έλεγχοι των bytes τρέχουν όταν ξανανοίξει.
+if(!(await p.isVisible('#photo'))){
+  check('πιλοτικό: το κουμπί φωτογραφίας ΔΕΝ φαίνεται', true);
+  await p.setInputFiles('#photoInput', fs.realpathSync(tmp));
+  await p.waitForTimeout(500);
+  check('πιλοτικό: αρχείο στο κρυφό input δεν ανοίγει την κάλυψη και δεν στέλνεται', !(await p.isVisible('#s-redact.on')) && sent === null);
+} else {
+  await p.click('#photo');
+  await p.fill('#keyInput', 'AIza' + 'P'.repeat(35));
+  const [chooser] = await Promise.all([p.waitForEvent('filechooser'), p.click('#keySave')]);
+  await chooser.setFiles(fs.realpathSync(tmp));
+  await p.waitForSelector('#s-redact.on');
 
-// Περιοχή κάλυψης: οριζόντια λωρίδα στο πάνω μέρος (σε κλάσματα της εικόνας, για σύγκριση με τα bytes).
-const box = await p.locator('#redactCanvas').boundingBox();
-const frac = {x0: 0.15, x1: 0.85, y0: 0.08, y1: 0.20};
-const before = await p.evaluate(({x, y}) => { const c = document.getElementById('redactCanvas'); return [...c.getContext('2d').getImageData(c.width * x, c.height * y, 1, 1).data].slice(0, 3); }, {x: 0.5, y: 0.14});
-await p.mouse.move(box.x + box.width * frac.x0, box.y + box.height * frac.y0);
-await p.mouse.down();
-await p.mouse.move(box.x + box.width * frac.x1, box.y + box.height * frac.y1, {steps: 6});
-await p.mouse.up();
-await p.click('#ctaBtn');
-await p.waitForSelector('#s-lines.on', {timeout: 20000});
+  // Περιοχή κάλυψης: οριζόντια λωρίδα στο πάνω μέρος (σε κλάσματα της εικόνας, για σύγκριση με τα bytes).
+  const box = await p.locator('#redactCanvas').boundingBox();
+  const frac = {x0: 0.15, x1: 0.85, y0: 0.08, y1: 0.20};
+  const before = await p.evaluate(({x, y}) => { const c = document.getElementById('redactCanvas'); return [...c.getContext('2d').getImageData(c.width * x, c.height * y, 1, 1).data].slice(0, 3); }, {x: 0.5, y: 0.14});
+  await p.mouse.move(box.x + box.width * frac.x0, box.y + box.height * frac.y0);
+  await p.mouse.down();
+  await p.mouse.move(box.x + box.width * frac.x1, box.y + box.height * frac.y1, {steps: 6});
+  await p.mouse.up();
+  await p.click('#ctaBtn');
+  await p.waitForSelector('#s-lines.on', {timeout: 20000});
 
-const bytes = Buffer.from(sent, 'base64');
-if(process.env.PRIVACY_DUMP) fs.writeFileSync(process.env.PRIVACY_DUMP, bytes);
-check('στάλθηκε JPEG', bytes[0] === 0xFF && bytes[1] === 0xD8);
-check('τα bytes που στάλθηκαν ΔΕΝ έχουν EXIF', !hasExif(bytes));
-check('τα bytes που στάλθηκαν ΔΕΝ έχουν GPS IFD', !hasGpsIfd(bytes));
-check('τα bytes που στάλθηκαν έχουν μόνο segments της λευκής λίστας (κανένα APP1/APP13/COM…)', foreignSegments(bytes).length === 0,
-  headerSegments(bytes).map(s => '0x' + s.marker.toString(16)).join(' '));
-// Αποκωδικοποίηση ΤΩΝ BYTES ΠΟΥ ΣΤΑΛΘΗΚΑΝ και δειγματοληψία pixels.
-const px = await p.evaluate(async ({b64, pts}) => {
-  const img = new Image(); img.src = 'data:image/jpeg;base64,' + b64; await img.decode();
-  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-  const x = c.getContext('2d'); x.drawImage(img, 0, 0);
-  return pts.map(([fx, fy]) => [...x.getImageData(Math.floor(c.width * fx), Math.floor(c.height * fy), 1, 1).data].slice(0, 3));
-}, {b64: sent, pts: [[0.5, 0.14], [0.3, 0.1], [0.7, 0.18], [0.5, 0.6]]});
-const dark = rgb => rgb.every(v => v < 30), light = rgb => rgb.reduce((a, v) => a + v, 0) > 300;
-check('στο πρωτότυπο η περιοχή ΔΕΝ ήταν μαύρη', light(before), JSON.stringify(before));
-check('στα bytes που στάλθηκαν η καλυμμένη περιοχή είναι μαύρη (3 σημεία)', px.slice(0, 3).every(dark), JSON.stringify(px.slice(0, 3)));
-check('εκτός κάλυψης η εικόνα μένει ίδια (όχι μαύρη)', !dark(px[3]), JSON.stringify(px[3]));
+  const bytes = Buffer.from(sent, 'base64');
+  if(process.env.PRIVACY_DUMP) fs.writeFileSync(process.env.PRIVACY_DUMP, bytes);
+  check('στάλθηκε JPEG', bytes[0] === 0xFF && bytes[1] === 0xD8);
+  check('τα bytes που στάλθηκαν ΔΕΝ έχουν EXIF', !hasExif(bytes));
+  check('τα bytes που στάλθηκαν ΔΕΝ έχουν GPS IFD', !hasGpsIfd(bytes));
+  check('τα bytes που στάλθηκαν έχουν μόνο segments της λευκής λίστας (κανένα APP1/APP13/COM…)', foreignSegments(bytes).length === 0,
+    headerSegments(bytes).map(s => '0x' + s.marker.toString(16)).join(' '));
+  // Αποκωδικοποίηση ΤΩΝ BYTES ΠΟΥ ΣΤΑΛΘΗΚΑΝ και δειγματοληψία pixels.
+  const px = await p.evaluate(async ({b64, pts}) => {
+    const img = new Image(); img.src = 'data:image/jpeg;base64,' + b64; await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    return pts.map(([fx, fy]) => [...x.getImageData(Math.floor(c.width * fx), Math.floor(c.height * fy), 1, 1).data].slice(0, 3));
+  }, {b64: sent, pts: [[0.5, 0.14], [0.3, 0.1], [0.7, 0.18], [0.5, 0.6]]});
+  const dark = rgb => rgb.every(v => v < 30), light = rgb => rgb.reduce((a, v) => a + v, 0) > 300;
+  check('στο πρωτότυπο η περιοχή ΔΕΝ ήταν μαύρη', light(before), JSON.stringify(before));
+  check('στα bytes που στάλθηκαν η καλυμμένη περιοχή είναι μαύρη (3 σημεία)', px.slice(0, 3).every(dark), JSON.stringify(px.slice(0, 3)));
+  check('εκτός κάλυψης η εικόνα μένει ίδια (όχι μαύρη)', !dark(px[3]), JSON.stringify(px[3]));
+}
 
 // iframe
 await p.setContent(`<iframe src="${BASE}" width="400" height="300"></iframe>`);
