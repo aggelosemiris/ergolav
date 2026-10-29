@@ -236,34 +236,110 @@ await dictate(p, 'ένα κλιματιστικό και δύο ρίζες');
 await p.click('#ctaBtn');
 ok('#C αν δεν βρεθεί τίποτα από τον κατάλογο: μήνυμα, και μένεις στο κείμενο (όχι οθόνη ελέγχου)', await p.isVisible('#s-listen.on') && !(await p.isVisible('#s-lines.on')) && /κανένα υλικό από τον κατάλογο/.test(await p.textContent('#notice')), await p.textContent('#notice'));
 
-// ── Μέγεθος ≠ κατάλογος: η γραμμή ρωτάει και κλειδώνει το κουμπί ──
+// ── Μέγεθος: ό,τι υπάρχει στον κατάλογο μπαίνει· ό,τι δεν υπάρχει ρωτάει και κλειδώνει το κουμπί ──
+const lnSum = async loc => eurN(await loc.locator('.ln-sum').textContent());
 await p.goto('http://localhost:8080/');
-await dictate(p, 'θερμοσίφωνας 120 λίτρα και θερμοσίφωνας 80 λίτρα');
+await dictate(p, 'θερμοσίφωνας 100 λίτρα και θερμοσίφωνας και θερμοσίφωνας 90 λίτρα');
 await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
-const big = p.locator('.ln.flag:has-text("Είπες 120 λ.")');
-ok('#S «Είπες 120 λ. — ο κατάλογος έχει 80 λ. Έλεγξε την τιμή»', await big.count() === 1 && /Είπες 120 λ\. — ο κατάλογος έχει 80 λ\. Έλεγξε την τιμή/.test(await big.textContent()));
-ok('#S ίδιο μέγεθος (80 λίτρα) δεν ρωτάει', await p.locator('.ln:has-text("Είπες 80")').count() === 0 && await p.locator('.ln:not(.flag):has-text("Θερμοσίφωνας 80 λ.")').count() === 1);
+const h100 = p.locator('.ln:has(.ln-name:text-is("Θερμοσίφωνας 100 λ."))');
+ok('#S «θερμοσίφωνας 100 λίτρα» → 100 λ. χωρίς ερώτηση, 300,00 €', await h100.count() === 1 && !(await h100.getAttribute('class')).includes('flag') && await lnSum(h100) === 300);
+ok('#S «θερμοσίφωνας» → 80 λ. χωρίς ερώτηση', await p.locator('.ln:not(.flag):has(.ln-name:text-is("Θερμοσίφωνας 80 λ."))').count() === 1);
+const big = p.locator('.ln.flag:has-text("Είπες 90 λ.")');
+ok('#S «90 λίτρα» → «Είπες 90 λ. — ο κατάλογος έχει 80 λ. ή 100 λ.» με κουμπιά 80/100/Άλλο',
+  await big.count() === 1 && /Είπες 90 λ\. — ο κατάλογος έχει 80 λ\. ή 100 λ\. Διάλεξε/.test(await big.textContent()) &&
+  (await big.locator('[data-near]').allTextContents()).join('|') === '80 λ.|100 λ.' && await big.locator('[data-a="size-other"]').count() === 1,
+  (await big.textContent()).replace(/\s+/g, ' ').slice(0, 120));
 ok('#S το κουμπί μένει κλειδωμένο', await p.locator('#ctaBtn').isDisabled() && /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
-await big.locator('[data-a="size-cat"]').click();
-ok('#S «Κράτα 80 λ.» → επιβεβαιώνεται και ξεκλειδώνει', await p.locator('.ln.flag').count() === 0 && await p.locator('#ctaBtn').isEnabled());
+await big.locator('[data-near]', {hasText: '100 λ.'}).click();
+ok('#S επιλογή «100 λ.» → γίνεται 100 λ. και ξεκλειδώνει', await p.locator('.ln.flag').count() === 0 && await p.locator('.ln:has(.ln-name:text-is("Θερμοσίφωνας 100 λ."))').count() === 2 && await p.locator('#ctaBtn').isEnabled());
 await p.goto('http://localhost:8080/');
-await dictate(p, 'έπιπλο 60 εκατοστά');
+await dictate(p, 'έπιπλο 70 εκατοστά');
 await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
-await p.locator('[data-a="size-said"]').click();
-ok('#S «Βάλε 60 εκ.» → αλλάζει το όνομα και ζητά τιμή με το χέρι (κουμπί κλειδωμένο)', /Έπιπλο μπάνιου με νιπτήρα 60 εκ\./.test(await p.textContent('#lines')) && await p.locator('[data-p="cmat"]').isVisible() && await p.locator('#ctaBtn').isDisabled());
-ok('#S μετά το «Βάλε» δεν προτείνονται τιμές του καταλόγου (είναι για 80 εκ.)', await p.locator('.tier[data-t="normal"], .tier[data-t="eco"], .tier[data-t="premium"]').count() === 0);
+ok('#S «έπιπλο 70» → ερώτηση 60/80', (await p.locator('[data-near]').allTextContents()).join('|') === '60 εκ.|80 εκ.');
+await p.locator('[data-a="size-other"]').click();
+ok('#S «Άλλο μέγεθος» → όνομα 70 εκ., τιμή με το χέρι (κουμπί κλειδωμένο)', /Έπιπλο μπάνιου με νιπτήρα 70 εκ\./.test(await p.textContent('#lines')) && await p.locator('[data-p="cmat"]').isVisible() && await p.locator('#ctaBtn').isDisabled());
+ok('#S μετά το «Άλλο μέγεθος» δεν προτείνονται τιμές του καταλόγου (είναι για άλλο μέγεθος)', await p.locator('.tier[data-t="normal"], .tier[data-t="eco"], .tier[data-t="premium"]').count() === 0);
 await p.locator('.custom [data-a="cancel"]').click();
-ok('#S «Άκυρο» χωρίς τιμή → πίσω στην ερώτηση: όνομα 80 εκ., ξανά οι δύο επιλογές, κουμπί κλειδωμένο',
-  await p.locator('.ln.flag:has-text("Είπες 60 εκ.")').count() === 1 && /Έπιπλο μπάνιου με νιπτήρα 80 εκ\./.test(await p.textContent('#lines')) && !/60 εκ\./.test(await p.textContent(".ln-name")) &&
-  await p.locator('[data-a="size-cat"]').isVisible() && await p.locator('[data-a="size-said"]').isVisible() && await p.locator('#ctaBtn').isDisabled(),
+ok('#S «Άκυρο» χωρίς τιμή → πίσω στην ερώτηση: όνομα 80 εκ., ξανά οι επιλογές, κουμπί κλειδωμένο',
+  await p.locator('.ln.flag:has-text("Είπες 70 εκ.")').count() === 1 && !/70 εκ\./.test(await p.textContent('.ln-name')) &&
+  await p.locator('[data-near]').count() === 2 && await p.locator('[data-a="size-other"]').isVisible() && await p.locator('#ctaBtn').isDisabled(),
   await p.textContent('#lines'));
-await p.locator('[data-a="size-said"]').click();
+await p.locator('[data-a="size-other"]').click();
 await p.locator('[data-p="cmat"]').fill('250');
 await p.locator('.custom [data-a="keep"]').click();
 ok('#S με τη δική του τιμή ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled() && /250,00/.test(await p.textContent('#lines')));
 await p.locator('.tier[data-t="custom"]').click();
 await p.locator('.custom [data-a="cancel"]').click();
-ok('#S αφού έχει δική του τιμή, «Άκυρο» την κρατά (60 εκ., 250,00 €)', await p.locator('#ctaBtn').isEnabled() && /60 εκ\./.test(await p.textContent('.ln-name')) && /250,00/.test(await p.textContent('#lines')));
+ok('#S αφού έχει δική του τιμή, «Άκυρο» την κρατά (70 εκ., 250,00 €)', await p.locator('#ctaBtn').isEnabled() && /70 εκ\./.test(await p.textContent('.ln-name')) && /250,00/.test(await p.textContent('#lines')));
+
+// ── Τύπος από την κάρτα: αλλάζει όνομα, κωδικό, προτάσεις τιμής, σύνολα και PDF ──
+await p.goto('http://localhost:8080/');
+await dictate(p, 'θερμοσίφωνας');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+const hc = p.locator('.ln').first();
+ok('#T η σειρά τύπων φαίνεται πάντα, με το τωρινό επιλεγμένο (80 λ.)', (await hc.locator('.tp').allTextContents()).join('|') === '60 λ.|80 λ.|100 λ.|120 λ.|160 λ.' && await hc.locator('.tp.on').textContent() === '80 λ.');
+await hc.locator('.tp', {hasText: '120 λ.'}).click();
+ok('#T «120 λ.» → όνομα, κωδικός και τιμή (340,00 €)', await hc.locator('.ln-name').textContent() === 'Θερμοσίφωνας 120 λ.' && /ΚΩΔ\. 30120/.test(await hc.locator('.ln-meta').textContent()) && await lnSum(hc) === 340);
+ok('#T οι τρεις προτάσεις ακολουθούν τον νέο τύπο (κανονική 340,00 €)', (await hc.locator('.tier[data-t="normal"]').textContent()).includes('340,00'));
+ok('#T τα σύνολα ενημερώνονται (Υλικά 340,00 €)', /Υλικά\s*340,00 €/.test(await p.textContent('#totals')));
+// δική του τιμή για τον 120 λ. → φαίνεται στη λίστα μόνο για αυτόν τον κωδικό
+await hc.locator('.tier[data-t="custom"]').click();
+await hc.locator('[data-p="cmat"]').fill('355');
+await hc.locator('.custom [data-a="keep"]').click();
+await hc.locator('.tp', {hasText: '100 λ.'}).click();
+ok('#T άλλος τύπος → κανονική τιμή του τύπου (300,00 €), όχι η δική του του 120 λ.', await lnSum(hc) === 300 && await hc.locator('.tier.on[data-t="normal"]').count() === 1);
+await hc.locator('.tier[data-t="custom"]').click();
+ok('#T στον 100 λ. δεν εμφανίζεται η τιμή του 120 λ.', await hc.locator('.hi').count() === 0);
+await hc.locator('.custom [data-a="cancel"]').click();
+await hc.locator('.tp', {hasText: '120 λ.'}).click();
+await hc.locator('.tier[data-t="custom"]').click();
+ok('#T στον 120 λ. η αποθηκευμένη τιμή εμφανίζεται για επιλογή (όχι αυτόματα)', /355,00/.test(await hc.locator('.hist').textContent()) && await hc.locator('[data-p="cmat"]').inputValue() === '' && await lnSum(hc) === 340);
+await hc.locator('.custom [data-a="cancel"]').click();
+
+// ── Περιγραφή: μόνο κείμενο στο PDF ──
+await hc.locator('[data-a="desc-edit"]').click();
+ok('#D όσο είναι ανοιχτή η περιγραφή, το κουμπί κλειδώνει', await p.locator('#ctaBtn').isDisabled());
+await hc.locator('[data-p="desc"]').fill('Θερμοσίφωνας Nobel 120 λ.');
+await hc.locator('[data-a="desc-keep"]').click();
+ok('#D η κάρτα δείχνει την περιγραφή, τιμή και κωδικός ίδια', await hc.locator('.ln-name').textContent() === 'Θερμοσίφωνας Nobel 120 λ.' && /ΚΩΔ\. 30120/.test(await hc.locator('.ln-meta').textContent()) && await lnSum(hc) === 340);
+
+// ── Ποσότητα με γράψιμο ──
+await hc.locator('[data-a="qty-edit"]').click();
+await hc.locator('[data-p="eqty"]').fill('1.500');
+ok('#Q «1.500» ως ποσότητα → ασαφές, κουμπί κλειδωμένο', /ασαφές/.test(await hc.locator('[data-o="eqty"]').textContent()) && await p.locator('#ctaBtn').isDisabled());
+await hc.locator('[data-a="qty-keep"]').click();
+ok('#Q με ασαφή ποσότητα δεν εφαρμόζεται τίποτα', await hc.locator('[data-p="eqty"]').isVisible() && await lnSum(hc) === 340);
+await hc.locator('[data-p="eqty"]').fill('2');
+await hc.locator('[data-a="qty-keep"]').click();
+ok('#Q «2» → 2 τεμ., 680,00 €, ξεκλειδώνει', /2 τεμ\./.test(await hc.locator('[data-a="qty-edit"]').textContent()) && await lnSum(hc) === 680 && await p.locator('#ctaBtn').isEnabled());
+await p.click('#ctaBtn'); await p.waitForSelector('#s-pdf.on');
+const pdfRows = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr => tr.textContent.replace(/\s+/g, ' ')));
+ok('#T #D #Q το PDF: δική του περιγραφή, 2 τεμ., 680,00 €', pdfRows.length === 1 && /Θερμοσίφωνας Nobel 120 λ\./.test(pdfRows[0]) && /2 τεμ\./.test(pdfRows[0]) && /680,00/.test(pdfRows[0]), pdfRows.join(' | '));
+
+// ── Κατανάλωση: κόλλα / αρμόστοκος ──
+await p.goto('http://localhost:8080/');
+await dictate(p, '15 τετραγωνικά πλακάκι μάρμαρο');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+const gl = p.locator('.ln:has-text("Κόλλα πλακιδίων")'), gr = p.locator('.ln:has-text("Αρμόστοκος")');
+ok('#K κόλλα 60×120: «15 τ.μ. × 7 kg/τ.μ. + 10% φύρα = 5 σακιά»', /15 τ\.μ\. × 7 kg\/τ\.μ\. \+ 10% φύρα = 5 σακιά/.test(await gl.textContent()), (await gl.textContent()).replace(/\s+/g, ' '));
+ok('#K προτείνεται και αρμόστοκος', await gr.count() === 1);
+await gl.locator('[data-a="keep"]').click(); await gr.locator('[data-a="keep"]').click();
+await gl.locator('[data-p="rate"]').fill('5');
+ok('#K kg/τ.μ. 5 → 4 σακιά, αμέσως', /= 4 σακιά/.test(await gl.locator('[data-calc]').textContent()) && /4 σακί/.test(await gl.locator('[data-a="qty-edit"]').textContent()));
+await gl.locator('[data-p="waste"]').fill('1.500');
+ok('#K άκυρη φύρα → μήνυμα, κουμπί κλειδωμένο', !!(await gl.locator('[data-o="waste"]').textContent()) && await p.locator('#ctaBtn').isDisabled());
+await gl.locator('[data-p="waste"]').fill('10');
+ok('#K έγκυρη φύρα ξεκλειδώνει', await p.locator('#ctaBtn').isEnabled());
+const tile = p.locator('.ln:has(.ln-name:has-text("Πλακάκι"))');
+await tile.locator('[data-a="qty-edit"]').click(); await tile.locator('[data-p="eqty"]').fill('30'); await tile.locator('[data-a="qty-keep"]').click();
+ok('#K η κόλλα ακολουθεί τα τ.μ. (30 τ.μ. → 7 σακιά)', /30 τ\.μ\. × 5 kg\/τ\.μ\. \+ 10% φύρα = 7 σακιά/.test(await gl.locator('[data-calc]').textContent()), await gl.locator('[data-calc]').textContent());
+await gl.locator('[data-a="qty-edit"]').click(); await gl.locator('[data-p="eqty"]').fill('9'); await gl.locator('[data-a="qty-keep"]').click();
+ok('#K δική του ποσότητα: «δική σου ποσότητα» + επαναφορά', /9 σακί/.test(await gl.locator('[data-a="qty-edit"]').textContent()) && /Δική σου ποσότητα/.test(await gl.textContent()) && await gl.locator('[data-a="calc-reset"]').count() === 1);
+await tile.locator('[data-d="1"]').click();
+ok('#K χειροκίνητη ποσότητα κόλλας ΔΕΝ αλλάζει όταν αλλάξουν τα τ.μ.', /9 σακί/.test(await gl.locator('[data-a="qty-edit"]').textContent()));
+await gl.locator('[data-a="calc-reset"]').click();
+ok('#K «επαναφορά στον υπολογισμό» → 31 τ.μ. → 7 σακιά', /7 σακί/.test(await gl.locator('[data-a="qty-edit"]').textContent()) && !/Δική σου ποσότητα/.test(await gl.textContent()));
+ok('#K τα σύνολα περιλαμβάνουν την κόλλα (7 × 9,80 € = 68,60 €)', await lnSum(gl) === 68.6 && /Υλικά/.test(await p.textContent('#totals')));
 
 // ── Πληκτρολόγιο: γράφω / διορθώνω το κείμενο ──
 await p.goto('http://localhost:8080/');
