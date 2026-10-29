@@ -6,7 +6,7 @@ const BASE = process.env.APP_URL || 'http://localhost:8080/';
 const b = await chromium.launch(process.env.CHROMIUM_PATH ? {executablePath: process.env.CHROMIUM_PATH} : {});
 const results = [];
 const ok = (name, cond, detail = '') => { results.push({name, pass: !!cond}); console.log(`${cond ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`); };
-const PROFILE = JSON.stringify({name: 'Δοκιμή Τεχνική', trade: 'Υδραυλικός', phone: '', afm: ''});
+const PROFILE = JSON.stringify({name: 'Δοκιμή Τεχνική', trade: 'Υδραυλικός', phone: ''});
 
 // Νέα σελίδα με καταγραφή σφαλμάτων, CSP και εξωτερικών αιτημάτων· προαιρετικά αποθηκευμένα στοιχεία.
 async function page({viewport = {width: 400, height: 860}, profile = true, init} = {}){
