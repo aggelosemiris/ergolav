@@ -59,6 +59,56 @@ function toNumber(tok, next = ''){
 }
 const isWordNumber = t => !/\d/.test(t) && numberWord(t) != null;
 
+/** Αριθμός που ξεκινά στο i, και σύνθετος από διαδοχικές λέξεις («είκοσι πέντε») → {n, end}· null αν δεν είναι αριθμός. */
+function numAt(tokens, i){
+  let n = toNumber(tokens[i], tokens[i + 1]), end = i;
+  if(n == null) return null;
+  while(isWordNumber(tokens[end]) && isWordNumber(tokens[end + 1] || '')){
+    const m = numberWord(tokens[end + 1]);
+    if(n % 100 === 0 && m < 100) n += m;
+    else if(n >= 20 && n % 10 === 0 && m < 10) n += m;
+    else break;
+    end++;
+  }
+  return {n, end};
+}
+
+// Αριθμοί που περιγράφουν το προϊόν, όχι ποσότητα: διάσταση («30 επί 60», «30x60») ή μέγεθος («80 λίτρα», «60 εκ.»).
+// Τα «μέτρα», «τετραγωνικά», «τεμάχια», «σακιά» είναι μονάδες ποσότητας και δεν ανήκουν εδώ.
+const DIM_SEP = new Set(['επι', 'x', 'χ', '×', '*']);
+// Μονάδα μεγέθους → [είδος, εμφάνιση, συντελεστής προς λίτρα/εκατοστά].
+const SIZE_UNIT = {λιτρα:['vol','λ.',1], λιτρων:['vol','λ.',1], εκατοστα:['len','εκ.',1], εκ:['len','εκ.',1], ποντουσ:['len','εκ.',1],
+  χιλιοστα:['len','χιλ.',0.1], χιλ:['len','χιλ.',0.1], ιντσεσ:['len','ίντσες',2.54]};
+const fmtNum = n => String(n).replace('.', ',');
+const dimSize = (at, a, b) => ({at, kind:'dim', value:[a, b].sort((x, y) => x - y).join('×'), label:`${fmtNum(a)}×${fmtNum(b)}`});
+
+/** Θέσεις των tokens που είναι χαρακτηριστικά (δεν γίνονται ποσότητα) και τα μεγέθη που ειπώθηκαν. */
+function attributes(tokens){
+  const at = new Set(), sizes = [];
+  for(let i = 0; i < tokens.length; i++){
+    const x = tokens[i].match(/^(\d+(?:[.,]\d+)?)[xχ×*](\d+(?:[.,]\d+)?)$/);
+    if(x){ at.add(i); sizes.push(dimSize(i, ...[x[1], x[2]].map(v => parseFloat(v.replace(',', '.'))))); continue; }
+    const a = numAt(tokens, i);
+    if(!a) continue;
+    const b = DIM_SEP.has(tokens[a.end + 1]) ? numAt(tokens, a.end + 2) : null;
+    const u = SIZE_UNIT[(tokens[a.end + 1] || '').replace(/\.$/, '')];
+    const last = b ? b.end : u ? a.end + 1 : -1;
+    if(last < 0) continue;
+    for(let k = i; k <= last; k++) at.add(k);
+    sizes.push(b ? dimSize(i, a.n, b.n) : {at: i, kind: u[0], value: Math.round(a.n * u[2] * 100) / 100, label: `${fmtNum(a.n)} ${u[1]}`});
+    i = last;
+  }
+  return {at, sizes};
+}
+
+/** Μέγεθος στο όνομα του είδους του καταλόγου («Θερμοσίφωνας 80 λ.», «Ντουζιέρα 80×80»)· null αν δεν έχει. */
+function catalogSize(name){
+  const d = name.match(/(\d+(?:,\d+)?)×(\d+(?:,\d+)?)/);
+  if(d) return {...dimSize(-1, ...[d[1], d[2]].map(v => parseFloat(v.replace(',', '.')))), label: d[0]};
+  const m = name.match(/(\d+(?:,\d+)?)\s?(λ|εκ)\./);
+  return m ? {kind: m[2] === 'λ' ? 'vol' : 'len', value: parseFloat(m[1].replace(',', '.')), label: m[0]} : null;
+}
+
 // Keywords σε φωνητική μορφή (υπολογίζονται μία φορά).
 const PH = new Map(CATALOG.map(c => [c, {
   kw: c.keywords.map(phon), not: (c.notWords || []).map(phon), after: (c.notAfter || []).map(phon), before: (c.notBefore || []).map(phon),
@@ -87,16 +137,21 @@ function checkQty(line){
   return line;
 }
 
-function makeLine(item, qty, tokens, qtyMissing){
+function makeLine(item, qty, tokens, qtyMissing, dim){
   const line = {id:item.id, name:item.name, code:item.code || '', unit:item.unit, qty,
                 mat:item.mat || 0, lab:item.lab || 0};
   const q = (item.qualifiers || []).find(q => hasAny(tokens, q.kw));
   if(q) line.name = q.name;
+  if(dim) line.name += ' ' + dim;
   if(item.options){
     // Αν δεν ειπώθηκε τύπος και το υλικό έχει συνηθισμένη επιλογή (def), την παίρνουμε χωρίς ερώτηση.
-    const picked = item.options.find(o => hasAny(tokens, o.kw)) ?? item.options[item.def];
+    // Τύπος με άλλη διάσταση από αυτή που ειπώθηκε δεν μπαίνει σιωπηλά — ρωτάμε.
+    const sameDim = o => o.label.startsWith(dim + ' ');
+    const fits = o => !dim || !/^\d+×\d+/.test(o.label) || sameDim(o);
+    let picked = item.options.find(o => hasAny(tokens, o.kw)) ?? item.options[item.def];
+    if(picked && !fits(picked)) picked = undefined;
     const base = line.name;
-    line.pick = o => ({name:`${base} ${o.label}`, code:o.code, mat:o.mat, lab:o.lab ?? item.lab ?? 0});
+    line.pick = o => ({name:`${base} ${dim && sameDim(o) ? o.label.slice(dim.length + 1) : o.label}`, code:o.code, mat:o.mat, lab:o.lab ?? item.lab ?? 0});
     if(picked){ Object.assign(line, line.pick(picked)); }
     else { line.flag = true; line.options = item.options; }
   }
@@ -105,7 +160,7 @@ function makeLine(item, qty, tokens, qtyMissing){
 }
 
 // Συντομογραφίες σημειώσεων («12 μ.», «τ.μ.», «τεμ.») — η τελεία τους δεν κλείνει φράση.
-const ABBR = /(^|[\s\d])(τ\.\s?μ|τμ|μ|τεμ|τεμαχ|μετ|κιλ|λιτ|σακ|κουτ)\./gi;
+const ABBR = /(^|[\s\d])(τ\.\s?μ|τμ|μ|τεμ|τεμαχ|μετ|κιλ|λιτ|σακ|κουτ|εκ|χιλ)\./gi;
 
 // Μονάδες που μπορεί να ακολουθούν την ποσότητα (κανονικοποιημένες ρίζες → εμφάνιση).
 const UNIT_WORDS = [[/^(μ|μετρ|μετ|m|meters?|metres?)$|^μετρ/, 'μ.'], [/^(τμ|τετραγων|sqm|m2)/, 'τ.μ.'], [/^(τεμ|pcs|pieces?)/, 'τεμ.'], [/^σακ/, 'σακί'],
@@ -157,7 +212,17 @@ export function parse(text){
     if(!seg) continue;
     const tokens = norm(seg).split(/[\s\-–—/]+/).map(t => t.replace(/[«»"'()]/g, '')).filter(Boolean);
     let pending = null, pendingAt = -1, found = 0, lastNum = -2;
-    const used = new Set(), seen = new Set();
+    const attr = attributes(tokens);
+    const used = new Set(attr.at), seen = new Set(), saidQty = new Map(), inclQty = new Set();
+    const items = tokens.map((_, k) => used.has(k) ? null : findItem(tokens, k));
+    // Υλικό που το περιέχει ήδη άλλο υλικό της ίδιας φράσης («νιπτήρας με έπιπλο») δεν χρεώνεται χωριστά.
+    const included = new Set(items.flatMap((it, k) =>
+      it && !tokens.slice(Math.max(0, k - 3), k).some(t => NEG.has(t)) ? it.includes || [] : []));
+    // Μέγεθος για το υλικό στη θέση i: όσα ειπώθηκαν μέχρι το επόμενο υλικό, αλλιώς από το προηγούμενο ως εδώ.
+    const sizeFor = (i, list) => {
+      const prev = items.findLastIndex((it, k) => it && k < i), next = items.findIndex((it, k) => it && k > i);
+      return list.find(d => d.at > i && (next < 0 || d.at < next)) ?? list.findLast(d => d.at < i && d.at > prev);
+    };
     if(tokens.some(t => CORR.has(t))) correcting = true;
     const corrHere = tokens.some(t => CORR_EXPLICIT.has(t)), corrNear = corrHere || prevCorr;
     prevCorr = corrHere;
@@ -182,6 +247,11 @@ export function parse(text){
         for(let k = lines.length - 1; k >= 0; k--) if(lines[k].id === item.id){ if(lines[k] === lastLine) lastLine = null; lines.splice(k, 1); }
         continue;
       }
+      if(included.has(item.id)){
+        // «δύο νιπτήρες με έπιπλο»: η ποσότητα δεν μεταφέρεται σιωπηλά στο έπιπλο — θα ζητηθεί.
+        if(pending != null) inclQty.add(item.id);
+        found++; pending = null; continue;
+      }
       // Δεύτερη λέξη για το ίδιο υλικό στην ίδια φράση («2 κάδοι μπάζα») — όχι νέα γραμμή.
       if(pending == null && seen.has(item.id)) continue;
       seen.add(item.id);
@@ -189,18 +259,24 @@ export function parse(text){
       // Ποσότητα μετά το υλικό («σωλήνας 12 μέτρα»): ψάχνουμε μέχρι το επόμενο υλικό.
       if(pending == null){
         for(let j = i + 1; j < tokens.length && !findItem(tokens, j); j++){
+          if(used.has(j)) continue;
           const m = toNumber(tokens[j], tokens[j + 1]);
           if(m != null){ pending = m; used.add(j); break; }
         }
       }
       const qtyMissing = pending == null;
+      saidQty.set(item, saidQty.get(item) || !qtyMissing);
       const qty = pending ?? 1;
       pending = null;
-      const line = makeLine(item, qty, tokens, qtyMissing);
-      const same = lines.find(l => l.id === line.id && (l.name === line.name || correcting) && !l.flag && !line.flag);
+      const line = makeLine(item, qty, tokens, qtyMissing, item.sizeInName ? sizeFor(i, attr.sizes.filter(d => d.kind === 'dim'))?.label : undefined);
+      // Είπε άλλο μέγεθος από αυτό του καταλόγου («θερμοσίφωνας 120 λίτρα» ≠ 80 λ.) → ρωτάμε, όχι σιωπηλά άλλο είδος.
+      const said = sizeFor(i, attr.sizes), cs = catalogSize(item.name);
+      if(said && cs && (said.kind !== cs.kind || said.value !== cs.value)) line.sizeCheck = {said: said.label, cat: cs.label};
+      const same = lines.find(l => l.id === line.id && (l.name === line.name || correcting) && !l.flag && !line.flag &&
+        (correcting || (!l.sizeCheck && !line.sizeCheck)));
       if(same && correcting){
         // Διόρθωση: η νέα αναφορά αντικαθιστά την παλιά (ποσότητα και τύπο).
-        Object.assign(same, {...line, qtyMissing: line.qtyMissing});
+        Object.assign(same, {...line, qtyMissing: line.qtyMissing, sizeCheck: line.sizeCheck});
         correcting = false;
         lastLine = same;
       } else if(same){
@@ -214,16 +290,22 @@ export function parse(text){
         lastLine = line;
       }
     }
+    for(const [item, said] of saidQty) if(!said && item.includes?.some(id => inclQty.has(id))){
+      const l = lines.find(l => l.id === item.id);
+      if(l) l.qtyMissing = true;
+    }
     // Διόρθωση χωρίς επανάληψη υλικού («12 μέτρα σωλήνα, όχι, τελικά 15 μέτρα»): η νέα ποσότητα αντικαθιστά
     // εκείνη του ΑΜΕΣΩΣ προηγούμενου υλικού μόνο αν (α) υπάρχει ρητή λέξη διόρθωσης σε αυτή ή την προηγούμενη
     // φράση, (β) η φράση έχει μόνο ποσότητα/μονάδα/λέξεις διόρθωσης, (γ) η μονάδα είναι ρητά ίδια — χωρίς μονάδα
     // μόνο για τεμάχια. Αλλιώς ισχύει ό,τι πριν (η ποσότητα φαίνεται ως γραμμή για έλεγχο).
-    if(!found && pending != null && lastLine && corrNear){
+    // Ίδιοι κανόνες χωρίς λέξη διόρθωσης όταν η ποσότητα ΕΛΕΙΠΕ («πλακάκι 30 επί 60, δεκαπέντε τετραγωνικά»),
+    // αλλά τότε μόνο με ρητά ίδια μονάδα.
+    if(!found && pending != null && lastLine && (corrNear || lastLine.qtyMissing)){
       const numIdx = tokens.map((t, k) => toNumber(t) != null ? k : -1).filter(k => k >= 0);
       const units = tokens.map(unitOf).filter(Boolean);
       const onlyCorrection = tokens.every(t => toNumber(t) != null || unitOf(t) || CORR.has(t) || FILLER.has(t));
       const oneNumber = numIdx.length && numIdx[numIdx.length - 1] - numIdx[0] + 1 === numIdx.length;
-      const unitOk = units.length ? units.every(u => u === lastLine.unit) : lastLine.unit === 'τεμ.';
+      const unitOk = units.length ? units.every(u => u === lastLine.unit) : corrNear && lastLine.unit === 'τεμ.';
       if(onlyCorrection && oneNumber && unitOk){
         lastLine.qty = pending; lastLine.qtyMissing = false; checkQty(lastLine);
         continue;

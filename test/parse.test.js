@@ -184,3 +184,109 @@ test('#3 η αντικατάσταση αφορά μόνο το ΑΜΕΣΩΣ π�
   const r3 = parse('12 μέτρα σωλήνα, όχι, τελικά 15 μέτρα από την κουζίνα');
   assert.equal(byId(r3, 'pipe')[0].qty, 12);
 });
+
+// ── Αριθμοί που περιγράφουν το προϊόν (διάσταση, λίτρα, εκατοστά) δεν είναι ποσότητα ──
+const row = l => [l.name, l.qty, l.unit, !!l.qtyMissing];
+
+test('διάσταση πλακακιού: «30 επί 60» δεν γίνεται 30 τ.μ., μπαίνει στο όνομα', () => {
+  for(const t of ['πλακάκι 30 επί 60, δεκαπέντε τετραγωνικά', 'πλακάκι 30 επί 60 δεκαπέντε τετραγωνικά', 'πλακάκι 30x60 15 τ.μ.', 'πλακάκι 30 χ 60, 15 τετραγωνικά']){
+    const r = parse(t);
+    assert.deepEqual(row(byId(r, 'tile')[0]), ['Πλακάκι 30×60', 15, 'τ.μ.', false], t);
+    assert.equal(byId(r, 'glue')[0].qty, 4, `κόλλα από τα 15 τ.μ. (όχι 7): ${t}`);
+  }
+  assert.deepEqual(row(byId(parse('δεκαπέντε τετραγωνικά πλακάκι είκοσι επί είκοσι'), 'tile')[0]), ['Πλακάκι 20×20', 15, 'τ.μ.', false]);
+});
+
+test('διάσταση που ταιριάζει με τον τύπο δεν γράφεται δύο φορές', () => {
+  const tile = byId(parse('πλακάκι 30χ60 λευκό 15 τετραγωνικά'), 'tile')[0];
+  assert.equal(tile.name, 'Πλακάκι 30×60 λευκό ματ');
+  assert.equal(tile.qty, 15);
+  assert.equal(tile.flag, undefined);
+  assert.equal(byId(parse('πλακάκι τοίχου 30 επί 60 λευκό, 10 τετραγωνικά'), 'tile')[0].name, 'Πλακάκι τοίχου 30×60 λευκό ματ');
+});
+
+test('διάσταση που ΔΕΝ ταιριάζει με τον τύπο → ρωτάει τύπο (όχι σιωπηλά 30×60)', () => {
+  const tile = byId(parse('πλακάκι 20 επί 20 λευκό, 10 τετραγωνικά'), 'tile')[0];
+  assert.equal(tile.flag, true);
+  assert.equal(tile.qty, 10);
+  assert.equal(tile.name, 'Πλακάκι 20×20');
+});
+
+test('σκέτο «πλακάκι 30 επί 60» → ζητάει ποσότητα (όχι 30 τ.μ., όχι σιωπηλά 1 τ.μ.)', () => {
+  const tile = byId(parse('πλακάκι 30 επί 60'), 'tile')[0];
+  assert.equal(tile.name, 'Πλακάκι 30×60');
+  assert.equal(tile.qtyMissing, true);
+});
+
+test('ποσότητα σε χωριστή φράση συμπληρώνει μόνο ποσότητα που έλειπε, και μόνο με ίδια μονάδα', () => {
+  assert.deepEqual(row(byId(parse('πλακάκι λευκό, 15 τετραγωνικά'), 'tile')[0]), ['Πλακάκι 30×60 λευκό ματ', 15, 'τ.μ.', false]);
+  assert.equal(byId(parse('πλακάκι λευκό, 15'), 'tile')[0].qtyMissing, true, 'χωρίς μονάδα δεν συνδέεται');
+  assert.equal(byId(parse('πλακάκι λευκό, 15 μέτρα'), 'tile')[0].qtyMissing, true, 'άλλη μονάδα δεν συνδέεται');
+  assert.equal(byId(parse('10 τετραγωνικά πλακάκι λευκό, 15 τετραγωνικά'), 'tile')[0].qty, 10, 'χωρίς διόρθωση δεν αντικαθιστά');
+});
+
+test('λίτρα / εκατοστά σε τεμάχια: 1 τεμάχιο, όχι 80', () => {
+  for(const [t, id] of [['θερμοσίφωνας ογδόντα λίτρα', 'heater'], ['θερμοσίφωνας 80 λίτρων', 'heater'], ['έπιπλο μπάνιου 80 εκατοστά', 'vanity'],
+    ['έπιπλο μπάνιου 80 εκ.', 'vanity'], ['έπιπλο 80 πόντους', 'vanity']]){
+    const l = byId(parse(t), id)[0];
+    assert.equal(l.qty, 1, t);
+    assert.equal(l.qtyCheck, false, t);
+    assert.equal(l.qtyMissing, undefined, `τεμάχια: όπως πριν, χωρίς ερώτηση — ${t}`);
+  }
+  assert.equal(byId(parse('δύο θερμοσίφωνες 80 λίτρα'), 'heater')[0].qty, 2);
+  assert.equal(byId(parse('θερμοσίφωνας 80 λίτρα δύο τεμάχια'), 'heater')[0].qty, 2);
+});
+
+test('μονάδες ποσότητας δεν αλλάζουν: μέτρα, τετραγωνικά, τεμάχια, σακιά', () => {
+  assert.equal(byId(parse('10 μέτρα σωλήνα'), 'pipe')[0].qty, 10);
+  assert.deepEqual(row(byId(parse('σωλήνας 20 χιλιοστά 10 μέτρα'), 'pipe')[0]).slice(1), [10, 'μ.', false]);
+  assert.equal(byId(parse('σωλήνας 20 χιλ. 10 μέτρα'), 'pipe')[0].qty, 10);
+  assert.equal(byId(parse('3 σακιά κόλλα'), 'glue')[0].qty, 3);
+  assert.equal(byId(parse('2 τεμάχια διακόπτες'), 'valve')[0].qty, 2);
+  assert.equal(byId(parse('δύο λεκάνες, όχι 3, τελικά 2 λεκάνες'), 'wc')[0].qty, 2);
+  assert.equal(byId(parse('12 μέτρα σωλήνα, όχι, τελικά 15 μέτρα'), 'pipe')[0].qty, 15);
+});
+
+// ── Νιπτήρας + έπιπλο στην ίδια φράση: το έπιπλο έχει ήδη νιπτήρα ──
+test('«νιπτήρας με έπιπλο» → μόνο το έπιπλο (όχι διπλή χρέωση)', () => {
+  for(const t of ['νιπτήρας με έπιπλο', 'έπιπλο με νιπτήρα', 'έπιπλο μπάνιου με νιπτήρα', 'ένας νιπτήρας με έπιπλο μπάνιου']){
+    const r = parse(t);
+    assert.deepEqual(cat(r).map(l => [l.id, l.qty]), [['vanity', 1]], t);
+  }
+});
+
+test('νιπτήρας και έπιπλο που δεν είναι ένα: μένουν και τα δύο', () => {
+  assert.deepEqual(cat(parse('νιπτήρας')).map(l => [l.id, l.qty]), [['basin', 1]]);
+  assert.deepEqual(cat(parse('δύο νιπτήρες και ένα έπιπλο')).map(l => [l.id, l.qty]), [['basin', 2], ['vanity', 1]]);
+  assert.deepEqual(cat(parse('δύο νιπτήρες, ένα έπιπλο')).map(l => [l.id, l.qty]), [['basin', 2], ['vanity', 1]]);
+  assert.deepEqual(cat(parse('νιπτήρας χωρίς έπιπλο')).map(l => [l.id, l.qty]), [['basin', 1]]);
+});
+
+test('«δύο νιπτήρες με έπιπλο» → ένα έπιπλο, αλλά ζητάει ποσότητα (το «δύο» δεν χάνεται σιωπηλά)', () => {
+  const r = parse('δύο νιπτήρες με έπιπλο');
+  assert.deepEqual(cat(r).map(l => [l.id, !!l.qtyMissing]), [['vanity', true]]);
+  assert.equal(byId(parse('δύο έπιπλα με νιπτήρα'), 'vanity')[0].qty, 2);
+  assert.equal(byId(parse('δύο έπιπλα με νιπτήρα'), 'vanity')[0].qtyMissing, undefined);
+});
+
+// ── Μέγεθος που είπε ο χρήστης ≠ μέγεθος του είδους στον κατάλογο → η γραμμή ρωτάει ──
+test('άλλο μέγεθος από τον κατάλογο → ρωτάει (όχι σιωπηλά άλλο είδος)', () => {
+  assert.deepEqual(byId(parse('θερμοσίφωνας 120 λίτρα'), 'heater')[0].sizeCheck, {said: '120 λ.', cat: '80 λ.'});
+  assert.deepEqual(byId(parse('έπιπλο 60 εκατοστά'), 'vanity')[0].sizeCheck, {said: '60 εκ.', cat: '80 εκ.'});
+  assert.deepEqual(byId(parse('ντουζιέρα 90 επί 90'), 'shower')[0].sizeCheck, {said: '90×90', cat: '80×80'});
+});
+
+test('ίδιο μέγεθος με τον κατάλογο → δεν ρωτάει', () => {
+  assert.ok(!byId(parse('θερμοσίφωνας 80 λίτρα'), 'heater')[0].sizeCheck);
+  assert.ok(!byId(parse('έπιπλο μπάνιου 80 εκατοστά'), 'vanity')[0].sizeCheck);
+  assert.ok(!byId(parse('έπιπλο 800 χιλιοστά'), 'vanity')[0].sizeCheck, '800 χιλ. = 80 εκ.');
+  assert.ok(!byId(parse('ντουζιέρα 80x80'), 'shower')[0].sizeCheck);
+  assert.ok(!byId(parse('θερμοσίφωνας'), 'heater')[0].sizeCheck, 'χωρίς μέγεθος: όπως πριν');
+  assert.ok(!byId(parse('πλακάκι 30 επί 60 15 τετραγωνικά'), 'tile')[0].sizeCheck, 'το πλακάκι δεν έχει μέγεθος στον κατάλογο');
+});
+
+test('μέγεθος: διόρθωση καθαρίζει την ερώτηση, διαφορετικά μεγέθη δεν ενώνονται', () => {
+  assert.ok(!byId(parse('θερμοσίφωνας 120 λίτρα, όχι, θερμοσίφωνας 80 λίτρα'), 'heater')[0].sizeCheck);
+  const two = byId(parse('θερμοσίφωνας 80 λίτρα. θερμοσίφωνας 120 λίτρα'), 'heater');
+  assert.deepEqual(two.map(l => [l.qty, !!l.sizeCheck]), [[1, false], [1, true]]);
+});

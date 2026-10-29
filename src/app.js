@@ -10,6 +10,9 @@ import { makePdf, shareFile, download } from './share.js';
 import { parseAmount, toCents, formatEur, formatQty } from './number.js';
 import { tiers, priceKey, history, remember, ageLabel, isStale } from './prices.js';
 
+// Πιλοτικό: δεν στέλνουμε φωτογραφίες σε τρίτους. Με true ξανανοίγει η ροή φωτογραφίας (κουμπί, κάλυψη, key).
+const PHOTO_ENABLED = false;
+
 const SAMPLE = 'Ανακαίνιση μπάνιου. Δώδεκα μέτρα σωλήνα πολυστρωματικό, μια μπαταρία νιπτήρα, λεκάνη κρεμαστή με καζανάκι εντοιχισμού, και δώδεκα τετραγωνικά πλακάκι τοίχου.';
 const BARS = 18;
 
@@ -58,9 +61,10 @@ function renderChips(text){
   // Κρατάμε τα τσιπάκια που υπάρχουν ήδη, ώστε να «σκάνε» μόνο τα καινούρια.
   const old = new Map([...box.children].map(c => [c.textContent, c]));
   const next = parse(text).lines.filter(l => !l.unknown && !l.suggest).map(l => {
-    const label = `${fmtQty(l.qty)} ${l.unit} ${l.name}${l.flag ? ' ?' : ''}`;
+    const q = l.flag || l.sizeCheck;
+    const label = `${fmtQty(l.qty)} ${l.unit} ${l.name}${q ? ' ?' : ''}`;
     let c = old.get(label);
-    if(!c){ c = document.createElement('span'); c.className = 'chip' + (l.flag ? ' q' : ''); c.textContent = label; }
+    if(!c){ c = document.createElement('span'); c.className = 'chip' + (q ? ' q' : ''); c.textContent = label; }
     return c;
   });
   box.replaceChildren(...next);
@@ -139,11 +143,12 @@ if(!micSupported) $('micNote').textContent = 'Ο browser σου δεν έχει 
 const shot = $('shot');
 let pendingPhoto = null;
 
-$('photo').onclick = () => getKey() ? $('photoInput').click() : openKey();
+$('photo').hidden = !PHOTO_ENABLED;
+$('photo').onclick = () => { if(PHOTO_ENABLED) getKey() ? $('photoInput').click() : openKey(); };
 $('photoInput').onchange = async e => {
   const file = e.target.files[0];
   e.target.value = '';
-  if(!file) return;
+  if(!file || !PHOTO_ENABLED) return;
   started = Date.now();
   let img;
   try {
@@ -197,6 +202,7 @@ async function openRedact(img){
 }
 
 async function readPhoto(img){
+  if(!PHOTO_ENABLED) return;
   show('s-listen','Διαβάζω');
   notice(''); wave.hidden = true; $('listenAlt').hidden = true; $('chips').replaceChildren();
   shot.src = img.url; shot.hidden = false; shot.classList.add('reading');
@@ -223,11 +229,12 @@ async function readPhoto(img){
 
 $('changeKey').onclick = () => openKey();
 // Πάντα διαθέσιμη πρόσβαση στο key (αλλαγή/διαγραφή), ακόμα κι όταν η φωτογραφία ανοίγει κατευθείαν την κάμερα.
-const syncKeyUi = () => { $('keySettings').hidden = !getKey(); };
+const syncKeyUi = () => { $('keySettings').hidden = !PHOTO_ENABLED || !getKey(); };
 $('keySettings').onclick = () => openKey();
 syncKeyUi();
 
 function openKey(msg){
+  if(!PHOTO_ENABLED) return;
   $('keyError').hidden = !msg; $('keyError').textContent = msg || '';
   $('keyInput').value = '';
   $('keyInput').type = 'password'; $('keyShow').textContent = 'Εμφάνιση'; $('keyShow').setAttribute('aria-pressed', 'false');
@@ -288,11 +295,11 @@ function showFieldError(el, key, msg){
 // Κάθε γραμμή δείχνει μόνο υλικό (στρογγυλοποιημένο ανά γραμμή, όπως στα σύνολα — το PDF «βγάζει» στο λεπτό).
 // Η εργασία είναι μία τιμή για όλη τη δουλειά (LABOR) και δεν ανήκει σε γραμμή.
 const matOf = l => Math.round(l.qty * l.mat);
-const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l));
+const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l) && !l.sizeCheck);
 // Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
 const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.customOpen).length; }
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.customOpen).length; }
 
 function buildLines(text, warning){
   lastText = text;                         // για «Διόρθωσε το κείμενο» από την οθόνη ελέγχου
@@ -316,7 +323,7 @@ function renderLines(){
   const box = $('lines'); box.innerHTML = '';
   LINES.forEach((l,i)=>{
     const el = document.createElement('div');
-    el.className = 'ln' + ((l.flag||l.suggest||needsQty(l))?' flag':'');
+    el.className = 'ln' + ((l.flag||l.suggest||needsQty(l)||l.sizeCheck)?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
     if(l.flag){
       el.innerHTML = `
@@ -361,12 +368,15 @@ function renderLines(){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${esc(l.name)}</span><span class="ln-sum num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</span></div>
         <div class="ln-meta">${esc(l.code)}</div>
+        ${l.sizeCheck ? `
+        <div class="ask">Είπες ${esc(l.sizeCheck.said)} — ο κατάλογος έχει ${esc(l.sizeCheck.cat.replace(/\.$/, ''))}. Έλεγξε την τιμή.</div>
+        <div class="sug-act"><button data-a="size-cat">Κράτα ${esc(l.sizeCheck.cat)}</button><button data-a="size-said">Βάλε ${esc(l.sizeCheck.said)}</button></div>` : ''}
         <div class="ln-row">
           <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><span class="num">${fmtQty(l.qty)} ${per}</span><button aria-label="Περισσότερα" data-d="1">+</button></div>
         </div>
         ${T ? `
         <div class="tiers" role="group" aria-label="Τιμή υλικού ανά ${per}">
-          ${[['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']].map(([t, n]) => `
+          ${(l.sizeSaid ? [] : [['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']]).map(([t, n]) => `
           <button class="tier${cur === t ? ' on' : ''}" data-t="${t}" aria-pressed="${cur === t}"><span>${n}</span><span class="num">${eur(T[t])}<small>/${per}</small></span></button>`).join('')}
           <button class="tier${cur === 'custom' || l.tier === 'custom' ? ' on' : ''}" data-t="custom" aria-pressed="${cur === 'custom'}"><span>Άλλη τιμή</span><span class="num">${l.tier === 'custom' && !l.customOpen ? `${eur(l.mat)}<small>/${per}</small>` : '…'}</span></button>
         </div>
@@ -378,6 +388,16 @@ function renderLines(){
           </div>
           <div class="sug-act"><button data-a="keep">Κράτα την</button><button data-a="cancel">Άκυρο</button></div>
         </div>` : ''}` : ''}`;
+      if(l.sizeCheck){
+        el.querySelector('[data-a="size-cat"]').onclick = () => { l.sizeCheck = null; checkedCount++; renderLines(); };
+        // Άλλο μέγεθος = άλλο είδος: παίρνει το όνομα που ειπώθηκε, χωρίς κωδικό καταλόγου, και η τιμή γράφεται με το χέρι
+        // (οι προτάσεις τιμής του καταλόγου κρύβονται — είναι για το άλλο μέγεθος).
+        el.querySelector('[data-a="size-said"]').onclick = () => {
+          Object.assign(l, {sizeSaid: {name: l.name, code: l.code, sizeCheck: l.sizeCheck},
+            name: l.name.replace(l.sizeCheck.cat, l.sizeCheck.said), code: '', sizeCheck: null, customOpen: true, focusCustom: true});
+          checkedCount++; renderLines();
+        };
+      }
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
         renderLines();
@@ -406,7 +426,12 @@ function renderLines(){
           remember(key, cents);
           checkedCount++; renderLines();
         };
-        el.querySelector('[data-a="cancel"]').onclick = () => { Object.assign(l, {customOpen: false, customDraft: ''}); renderLines(); };
+        el.querySelector('[data-a="cancel"]').onclick = () => {
+          Object.assign(l, {customOpen: false, customDraft: ''});
+          // «Βάλε 120 λ.» χωρίς δική του τιμή → πίσω στην ερώτηση (ποτέ όνομα 120 λ. με τιμή του 80 λ.).
+          if(l.sizeSaid && l.tier !== 'custom'){ Object.assign(l, l.sizeSaid); l.sizeSaid = null; }
+          renderLines();
+        };
         if(l.focusCustom){ l.focusCustom = false; setTimeout(() => input.focus(), 0); }
       }
     }
