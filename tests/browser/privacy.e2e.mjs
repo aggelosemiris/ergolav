@@ -59,6 +59,8 @@ check('η είσοδος αποτυγχάνει στη λευκή λίστα (AP
 
 const b = await chromium.launch(process.env.CHROMIUM_PATH ? {executablePath: process.env.CHROMIUM_PATH} : {});
 const p = await b.newPage({viewport: {width: 400, height: 860}});
+// Στοιχεία επιχείρησης ήδη αποθηκευμένα (η φόρμα πρώτης φοράς ελέγχεται στο app.e2e).
+await p.addInitScript(() => { if(!localStorage.getItem('ergolav.profile')) localStorage.setItem('ergolav.profile', JSON.stringify({name: 'Δοκιμή'})); });
 let sent = null;
 await p.route('https://generativelanguage.googleapis.com/**', async r => {
   sent = JSON.parse(r.request().postData()).contents[0].parts[0].inline_data.data;
