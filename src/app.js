@@ -57,16 +57,16 @@ function renderBrand(){
 function openProfile(back){
   profileBack = back;
   const p = PROFILE || {};
-  $('pfName').value = p.name || ''; $('pfTrade').value = p.trade || ''; $('pfPhone').value = p.phone || ''; $('pfAfm').value = p.afm || '';
+  $('pfName').value = p.name || ''; $('pfTrade').value = p.trade || ''; $('pfPhone').value = p.phone || '';
   $('pfError').hidden = true;
   show('s-profile', 'Τα στοιχεία σου');
   cta(null);
 }
 $('pfSave').onclick = () => {
-  const r = saveProfile({name: $('pfName').value, trade: $('pfTrade').value, phone: $('pfPhone').value, afm: $('pfAfm').value});
+  const r = saveProfile({name: $('pfName').value, trade: $('pfTrade').value, phone: $('pfPhone').value});
   if(r.error){
     $('pfError').hidden = false; $('pfError').textContent = r.error;
-    $({name: 'pfName', phone: 'pfPhone', afm: 'pfAfm'}[r.field]).focus();
+    $({name: 'pfName', phone: 'pfPhone'}[r.field]).focus();
     return;
   }
   PROFILE = r.profile; renderBrand();
@@ -722,7 +722,7 @@ function buildPdf(){
   const s = sums();
   const client = $('client').value.trim();
   const today = new Date().toLocaleDateString('el-GR');
-  const contact = [PROFILE.phone && `Τηλ. ${PROFILE.phone}`, PROFILE.afm && `ΑΦΜ ${PROFILE.afm}`].filter(Boolean).join(' · ');
+  const contact = PROFILE.phone ? `Τηλ. ${PROFILE.phone}` : '';
   $('pdf').innerHTML = `
     <div class="pdf-head">
       <div style="display:flex;gap:10px;align-items:center"><div class="logo">${esc(initials(PROFILE.name))}</div>

@@ -43,10 +43,11 @@ ok('#P πρώτο άνοιγμα: «Τα στοιχεία σου» πριν απ
 await p.click('#pfSave');
 ok('#P άδειο όνομα δεν αποθηκεύεται (μήνυμα, μένει η φόρμα)', await p.isVisible('#s-profile.on') && /όνομα/.test(await p.textContent('#pfError')) &&
   await p.evaluate(() => localStorage.getItem('ergolav.profile')) === null);
-await p.fill('#pfName', 'Νίκος Παπαδάκης'); await p.fill('#pfTrade', 'Υδραυλικός'); await p.fill('#pfPhone', '6912345678'); await p.fill('#pfAfm', '12345');
+ok('#P η φόρμα δεν ζητάει ΑΦΜ', await p.locator('#pfAfm').count() === 0 && !/ΑΦΜ/.test(await p.textContent('#s-profile')));
+await p.fill('#pfName', 'Νίκος Παπαδάκης'); await p.fill('#pfTrade', 'Υδραυλικός'); await p.fill('#pfPhone', '12345');
 await p.click('#pfSave');
-ok('#P ΑΦΜ που δεν έχει 9 ψηφία δεν αποθηκεύεται', await p.isVisible('#s-profile.on') && /ΑΦΜ/.test(await p.textContent('#pfError')));
-await p.fill('#pfAfm', '123456789');
+ok('#P τηλέφωνο που δεν στέκει δεν αποθηκεύεται', await p.isVisible('#s-profile.on') && /τηλέφωνο/i.test(await p.textContent('#pfError')));
+await p.fill('#pfPhone', '6912345678');
 await p.click('#pfSave');
 ok('#P μετά την αποθήκευση: αρχική οθόνη, κεφαλίδα με το όνομα, ειδικότητα, αρχικά «ΝΠ»', await p.isVisible('#s-start.on') && await p.textContent('#brandName') === 'Νίκος Παπαδάκης' &&
   await p.textContent('#brandTrade') === 'Υδραυλικός' && await p.textContent('#brandLogo') === 'ΝΠ');
@@ -54,6 +55,7 @@ await p.reload();
 ok('#P μετά από reload ΔΕΝ ξαναδείχνει φόρμα· η κεφαλίδα κρατά το όνομα', await p.isVisible('#s-start.on') && !(await p.isVisible('#s-profile.on')) && await p.textContent('#brandName') === 'Νίκος Παπαδάκης');
 ok('#P πεδίο «Πελάτης» άδειο, με placeholder', await p.inputValue('#client') === '' && await p.getAttribute('#client', 'placeholder') === 'Όνομα πελάτη, περιοχή');
 ok('#P τίτλος και κάτω κείμενο', await p.title() === 'ergolav — προσφορά επί τόπου' && /Ενδεικτικές τιμές\. Έλεγξέ τες πριν στείλεις\./.test(await p.textContent('.disclaimer')) && !/φανταστικά/.test(await p.textContent('body')));
+// Παλιά αποθήκευση (πριν βγει το ΑΦΜ): το ΑΦΜ πρέπει να αγνοηθεί και να σβηστεί.
 const PROFILE_SEED = JSON.stringify({name: 'Νίκος Παπαδάκης', trade: 'Υδραυλικός', phone: '6912345678', afm: '123456789'});
 
 // Φωτογραφία: κλειστή στο πιλοτικό (PHOTO_ENABLED = false στο src/app.js). Οι έλεγχοί της τρέχουν όταν ξανανοίξει.
@@ -201,7 +203,8 @@ ok('#4 ΦΠΑ 17% και στο PDF', /ΦΠΑ 17%/.test(await p.textContent('#pd
 // Όσο φτιάχνεται το PDF, το html2pdf κρατά προσωρινό αντίγραφο του #pdf στη σελίδα: διαβάζουμε αφού τελειώσει.
 await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000});
 const pdfHead = async () => (await p.textContent('#pdf .pdf-head')).replace(/\s+/g, ' ');
-ok('#P PDF: τα δικά του στοιχεία (όνομα, ειδικότητα, τηλέφωνο, ΑΦΜ, αρχικά)', /ΝΠ\s*Νίκος Παπαδάκης\s*Υδραυλικός\s*Τηλ\. 6912345678 · ΑΦΜ 123456789/.test(await pdfHead()), await pdfHead());
+ok('#P PDF: τα δικά του στοιχεία (όνομα, ειδικότητα, τηλέφωνο, αρχικά), χωρίς ΑΦΜ', /ΝΠ\s*Νίκος Παπαδάκης\s*Υδραυλικός\s*Τηλ\. 6912345678/.test(await pdfHead()) && !/ΑΦΜ|123456789/.test(await p.textContent('#pdf')), await pdfHead());
+ok('#P κανένα ΑΦΜ στη συσκευή (ούτε από παλιά αποθήκευση)', !/afm|123456789/.test(await p.evaluate(() => localStorage.getItem('ergolav.profile'))));
 ok('#P PDF: κανένα σταθερό στοιχείο («Αντωνίου», «0142», «ΚΑ»)', !/Αντωνίου|0142|Κατασκευές|\bΚΑ\b/.test(await p.textContent('#pdf')));
 const qno = async (pg = p) => (await pg.textContent('#pdf .qno')).trim();
 ok('#P PDF: πρώτη προσφορά της συσκευής = Αρ. 1', await qno() === '1', await qno());
@@ -261,7 +264,7 @@ const rows2 = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr =>
 ok('#P δεύτερη προσφορά = Αρ. 2', await qno() === '2', await qno());
 // αλλαγή από την κεφαλίδα: ίδια φόρμα, συμπληρωμένη· μετά πίσω στο PDF, με τα νέα στοιχεία και τον ΙΔΙΟ αριθμό
 await p.click('#brand');
-ok('#P πάτημα στην κεφαλίδα → ίδια φόρμα, με τα στοιχεία του', await p.isVisible('#s-profile.on') && await p.inputValue('#pfName') === 'Νίκος Παπαδάκης' && await p.inputValue('#pfAfm') === '123456789');
+ok('#P πάτημα στην κεφαλίδα → ίδια φόρμα, με τα στοιχεία του', await p.isVisible('#s-profile.on') && await p.inputValue('#pfName') === 'Νίκος Παπαδάκης' && await p.inputValue('#pfPhone') === '6912345678');
 await p.fill('#pfTrade', 'Υδραυλικός · Θερμοϋδραυλικά');
 await p.click('#pfSave');
 await p.waitForSelector('#s-pdf.on');
@@ -591,7 +594,7 @@ await p3.fill('#pfName', 'Δοκιμή'); await p3.click('#pfSave');
 await dictate(p3, 'τρεις πρίζες');
 await p3.click('#ctaBtn'); await p3.waitForSelector('#s-lines.on');
 await p3.click('#ctaBtn'); await p3.waitForSelector('#s-pdf.on');
-ok('#P χαλασμένος αριθμός → ξεκινά από Αρ. 1, χωρίς ΑΦΜ/τηλέφωνο αν δεν δόθηκαν', await qno(p3) === '1' && !/ΑΦΜ|Τηλ\./.test(await p3.textContent('#pdf .pdf-head')) && errs3.length === 0);
+ok('#P χαλασμένος αριθμός → ξεκινά από Αρ. 1, χωρίς τηλέφωνο αν δεν δόθηκε', await qno(p3) === '1' && !/ΑΦΜ|Τηλ\./.test(await p3.textContent('#pdf .pdf-head')) && errs3.length === 0);
 await p3.close();
 
 ok('#5 κανένα αίτημα σε API τρίτου όσο η φωτογραφία είναι κλειστή', PHOTO_ON || (gemBody === null && claudeBody === null));

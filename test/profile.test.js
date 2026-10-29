@@ -19,7 +19,8 @@ test('πρώτη φορά: δεν υπάρχουν στοιχεία', () => {
 test('αποθήκευση και ξαναδιάβασμα (μία φορά, μένουν)', () => {
   const data = env();
   const r = m.saveProfile({name: '  Νίκος   Παπαδάκης ', trade: 'Υδραυλικός', phone: '691 234 5678', afm: '123 456 789'});
-  assert.deepEqual(r, {profile: {name: 'Νίκος Παπαδάκης', trade: 'Υδραυλικός', phone: '691 234 5678', afm: '123456789'}, saved: true});
+  assert.deepEqual(r, {profile: {name: 'Νίκος Παπαδάκης', trade: 'Υδραυλικός', phone: '691 234 5678'}, saved: true}, 'ΑΦΜ δεν κρατιέται');
+  assert.doesNotMatch(data[m.PROFILE], /afm|123/);
   assert.ok(data[m.PROFILE]);
   assert.deepEqual(m.loadProfile(), r.profile);
 });
@@ -34,13 +35,17 @@ test('άδειο όνομα δεν αποθηκεύεται', () => {
   assert.deepEqual(Object.keys(data), []);
 });
 
-test('τηλέφωνο / ΑΦΜ που δεν στέκουν δεν μπαίνουν σιωπηλά στο PDF', () => {
+test('τηλέφωνο που δεν στέκει δεν μπαίνει σιωπηλά στο PDF', () => {
   env();
   assert.equal(m.saveProfile({name: 'Α', phone: '12345'}).field, 'phone');
   assert.equal(m.saveProfile({name: 'Α', phone: 'καλέστε με'}).field, 'phone');
-  assert.equal(m.saveProfile({name: 'Α', afm: '12345678'}).field, 'afm');
-  assert.equal(m.saveProfile({name: 'Α', afm: '12345678a'}).field, 'afm');
-  assert.equal(m.saveProfile({name: 'Α', phone: '+30 210 123 4567', afm: ''}).profile.phone, '+30 210 123 4567');
+  assert.equal(m.saveProfile({name: 'Α', phone: '+30 210 123 4567'}).profile.phone, '+30 210 123 4567');
+});
+
+test('παλιά αποθήκευση με ΑΦΜ: φορτώνει χωρίς ΑΦΜ και το σβήνει από τη συσκευή', () => {
+  const data = env({[m.PROFILE]: JSON.stringify({name: 'Νίκος', trade: '', phone: '', afm: '123456789'})});
+  assert.deepEqual(m.loadProfile(), {name: 'Νίκος', trade: '', phone: ''});
+  assert.doesNotMatch(data[m.PROFILE], /afm|123456789/);
 });
 
 test('αρχικά: δύο πρώτες λέξεις, κεφαλαία χωρίς τόνους', () => {
@@ -71,7 +76,7 @@ test('χαλασμένο localStorage δεν ρίχνει τίποτα', () => {
   assert.equal(m.loadProfile(), null);
   env({}, {broken: true});
   assert.equal(m.loadProfile(), null);
-  assert.deepEqual(m.saveProfile({name: 'Νίκος'}), {profile: {name: 'Νίκος', trade: '', phone: '', afm: ''}, saved: false}, 'δεκτά για τώρα, με ένδειξη ότι δεν αποθηκεύτηκαν');
+  assert.deepEqual(m.saveProfile({name: 'Νίκος'}), {profile: {name: 'Νίκος', trade: '', phone: ''}, saved: false}, 'δεκτά για τώρα, με ένδειξη ότι δεν αποθηκεύτηκαν');
   assert.equal(m.takeQuoteNo(), 1);
   delete globalThis.localStorage;
   assert.equal(m.loadProfile(), null, 'χωρίς localStorage καθόλου');

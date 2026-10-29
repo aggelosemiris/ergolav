@@ -8,16 +8,14 @@ const storage = () => { try { return globalThis.localStorage ?? null; } catch { 
 const clean = (v, max = 80) => typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '';
 const digits = s => s.replace(/\D/g, '');
 
-/** Έλεγχος πριν την αποθήκευση· {profile} ή {error, field}. Υποχρεωτικό μόνο το όνομα. */
+/** Έλεγχος πριν την αποθήκευση· {profile} ή {error, field}. Υποχρεωτικό μόνο το όνομα.
+ *  ΑΦΜ δεν ζητείται ούτε κρατιέται (ούτε γράφεται στο PDF): ό,τι υπήρχε από παλιότερη έκδοση πετιέται. */
 export function checkProfile(input){
-  const p = {name: clean(input?.name), trade: clean(input?.trade), phone: clean(input?.phone, 30), afm: clean(input?.afm, 20)};
+  const p = {name: clean(input?.name), trade: clean(input?.trade), phone: clean(input?.phone, 30)};
   if(!p.name) return {error: 'Γράψε το όνομα της επιχείρησης ή το ονοματεπώνυμό σου.', field: 'name'};
   // Ό,τι γράφεται στο PDF του πελάτη δεν μπαίνει σιωπηλά λάθος.
   if(p.phone && (!/^[+\d\s().-]+$/.test(p.phone) || digits(p.phone).length < 10 || digits(p.phone).length > 15))
     return {error: 'Το τηλέφωνο θέλει 10 ψηφία (π.χ. 6912345678) — ή άφησέ το κενό.', field: 'phone'};
-  if(p.afm && !/^\d{9}$/.test(p.afm.replace(/\s/g, '')))
-    return {error: 'Το ΑΦΜ έχει 9 ψηφία — ή άφησέ το κενό.', field: 'afm'};
-  if(p.afm) p.afm = digits(p.afm);
   return {profile: p};
 }
 
@@ -27,6 +25,8 @@ export function loadProfile(){
     const raw = storage()?.getItem(PROFILE);
     if(!raw) return null;
     const r = checkProfile(JSON.parse(raw));
+    // Παλιά αποθήκευση με ΑΦΜ: ξαναγράφεται χωρίς αυτό, ώστε να μη μένει στη συσκευή.
+    if(r.profile && /"afm"/.test(raw)) try { storage().setItem(PROFILE, JSON.stringify(r.profile)); } catch {}
     return r.profile ?? null;
   } catch { return null; }
 }
