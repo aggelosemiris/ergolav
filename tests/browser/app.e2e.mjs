@@ -100,14 +100,15 @@ if(PHOTO_ON){
   await p.waitForSelector('#s-lines.on');
 }
 
-// Στην προετοιμασία της προσφοράς μπαίνουν ΜΟΝΟ υλικά του καταλόγου: το «κλιματιστικά» (και ό,τι δεν υπάρχει) δεν φαίνεται πουθενά
-// Είδος εκτός καταλόγου ΜΕ ποσότητα: κάρτα για απόφαση (ποτέ σιωπηλά χαμένο). Πριν (b825383) σβηνόταν εντελώς.
-const unk = p.locator('.ln:has-text("Δεν το βρήκα στον κατάλογο")');
-ok('#C είδος εκτός καταλόγου με ποσότητα → κάρτα «Δεν το βρήκα στον κατάλογο: «2 τεμάχια κλιματιστικά»»', await unk.count() === 1 && /«2 τεμάχια κλιματιστικά»/.test(await unk.textContent()), (await p.textContent('#lines')).slice(0, 80));
-ok('#C η κάρτα κλειδώνει το κουμπί (2 γραμμές: κλιματιστικά + 999)', /2 γραμμές/.test(await p.textContent('#ctaNote')) && await p.locator('#ctaBtn').isDisabled(), await p.textContent('#ctaNote'));
-ok('#C στα σύνολα δεν μπαίνει πριν αποφασιστεί', !/Κλιματιστικ/.test(await p.textContent('#totals')));
-await unk.locator('[data-a="drop"]').click();
-ok('#C «Αφαίρεσέ το» → φεύγει, με «Αναίρεση»', await unk.count() === 0 && await p.locator('#toast [data-a="undo"]').isVisible());
+// Είδος εκτός καταλόγου = κανονική γραμμή προϊόντος ΧΩΡΙΣ τιμή (ποτέ σιωπηλά χαμένο· πριν, b825383, σβηνόταν εντελώς).
+const unk = p.locator('.ln:has(.ln-name:text-is("Κλιματιστικά"))');
+ok('#C είδος εκτός καταλόγου → γραμμή «Κλιματιστικά» 2 τεμ., «Δεν είναι στον κατάλογο — βάλε τιμή ή σβήσ\' το», πεδίο τιμής ανοιχτό',
+  await unk.count() === 1 && /2 τεμ\./.test(await unk.locator('[data-a="qty-edit"]').textContent()) && /Δεν είναι στον κατάλογο — βάλε τιμή ή σβήσ' το/.test(await unk.textContent()) &&
+  await unk.locator('[data-p="cmat"]').isVisible(), (await p.textContent('#lines')).slice(0, 80));
+ok('#C χωρίς τιμή κλειδώνει το κουμπί (2 γραμμές: κλιματιστικά + 999)', /2 γραμμές/.test(await p.textContent('#ctaNote')) && await p.locator('#ctaBtn').isDisabled(), await p.textContent('#ctaNote'));
+ok('#C στα σύνολα δεν μπαίνει χωρίς τιμή', !/Κλιματιστικ/.test(await p.textContent('#totals')));
+await unk.locator('[data-a="remove-line"]').click();
+ok('#C «Σβήσε» → φεύγει, με «Αναίρεση»', await unk.count() === 0 && await p.locator('#toast [data-a="undo"]').isVisible());
 // «999 λεκάνες κρεμαστές» + «λεκάνη κρεμαστή» = το ίδιο υλικό δύο φορές → ρωτάει, δεν αθροίζει σιωπηλά
 const dup = p.locator('.ln:has-text("Το είπες δύο φορές")');
 ok('#3 ίδιο υλικό δύο φορές → «Το είπες δύο φορές: 1 ή 999 ή 1.000;»', await dup.count() === 1 && /1 ή 999 ή 1\.000;/.test(await dup.textContent()), await p.textContent('#lines'));
@@ -280,7 +281,7 @@ await p.goto('http://localhost:8080/');
 await dictate(p, 'ένα κλιματιστικό και δύο ρίζες');
 await p.click('#ctaBtn');
 await p.waitForSelector('#s-lines.on');
-ok('#C μόνο εκτός καταλόγου: δύο κάρτες «Δεν το βρήκα», κουμπί κλειδωμένο', await p.locator('.ln:has-text("Δεν το βρήκα στον κατάλογο")').count() === 2 && await p.locator('#ctaBtn').isDisabled());
+ok('#C μόνο εκτός καταλόγου: δύο γραμμές χωρίς τιμή, κουμπί κλειδωμένο', await p.locator('.ln:has-text("Δεν είναι στον κατάλογο")').count() === 2 && await p.locator('#ctaBtn').isDisabled());
 // τίποτα που να είναι υλικό (τηλέφωνο, όνομα) → μήνυμα, μένεις στο κείμενο
 await p.goto('http://localhost:8080/');
 await dictate(p, 'μπάνιο για τον κύριο Παπαδόπουλο στο 6912345678');
@@ -405,9 +406,9 @@ await p.goto('http://localhost:8080/');
 await dictate(p, LONG);
 await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
 const names = await p.$$eval('#lines .ln-name', els => els.map(e => e.textContent));
-const sites = p.locator('.ln:has-text("Δεν το βρήκα στον κατάλογο: «3 σίτες»")');
-ok(`#L κείμενο ${LONG.length} χαρακτήρων: και τα 18 υλικά υπάρχουν (17 του καταλόγου + κάρτα «3 σίτες»)`,
-  LONG.length >= 430 && EXPECT.every(n => names.includes(n)) && await sites.count() === 1, EXPECT.filter(n => !names.includes(n)).join(' | ') || names.length);
+const siteLn = p.locator('.ln:has(.ln-name:text-is("Σίτες"))');
+ok(`#L κείμενο ${LONG.length} χαρακτήρων: και τα 18 υλικά υπάρχουν (17 του καταλόγου + «Σίτες» χωρίς τιμή)`,
+  LONG.length >= 430 && EXPECT.every(n => names.includes(n)) && await siteLn.count() === 1, EXPECT.filter(n => !names.includes(n)).join(' | ') || names.length);
 ok('#L καμία διπλή γραμμή (κάθε όνομα μία φορά)', names.length === new Set(names).size, names.join(' | '));
 ok('#L μόνο ένα καζανάκι και ένας μηχανισμός', names.filter(n => /Καζανάκι/.test(n)).length === 1 && names.filter(n => /Μηχανισμός/.test(n)).length === 1);
 ok('#L «σετ ντους» δεν έγινε ντουζιέρα', !names.some(n => /Ντουζιέρα/.test(n)));
@@ -418,15 +419,13 @@ ok('#L «Εργασία 1.200 ευρώ» → εργασία 1.200,00 € (όχι
 // προτάσεις κόλλας/αρμόστοκου + η κάρτα «σίτες» → πρόσθεσέ το με δική του τιμή
 await p.locator('.ln:has-text("Κόλλα πλακιδίων") [data-a="keep"]').click();
 await p.locator('.ln:has-text("Αρμόστοκος") [data-a="keep"]').click();
-ok('#L η κάρτα «σίτες» κλειδώνει το κουμπί', await p.locator('#ctaBtn').isDisabled() && /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
-await sites.locator('[data-a="add"]').click();
-const siteLn = p.locator('.ln:has(.ln-name:text-is("Σίτες"))');
-ok('#L «Πρόσθεσέ το» → όνομα και ποσότητα από τη φράση, τιμή υποχρεωτικά δική του (χωρίς προτάσεις καταλόγου)',
-  await siteLn.count() === 1 && /3 τεμ\./.test(await siteLn.locator('[data-a="qty-edit"]').textContent()) && await siteLn.locator('[data-p="cmat"]').isVisible() &&
-  await siteLn.locator('.tier[data-t="normal"]').count() === 0 && await p.locator('#ctaBtn').isDisabled());
+ok('#L «Σίτες» χωρίς τιμή κλειδώνει το κουμπί', await p.locator('#ctaBtn').isDisabled() && /1 γραμμή/.test(await p.textContent('#ctaNote')), await p.textContent('#ctaNote'));
+ok('#L «Σίτες»: όνομα και ποσότητα από τη φράση, τιμή υποχρεωτικά δική του (χωρίς προτάσεις καταλόγου)',
+  /3 τεμ\./.test(await siteLn.locator('[data-a="qty-edit"]').textContent()) && await siteLn.locator('[data-p="cmat"]').isVisible() &&
+  await siteLn.locator('.tier[data-t="normal"]').count() === 0);
 await siteLn.locator('.custom [data-a="cancel"]').click();
-ok('#L «Άκυρο» χωρίς τιμή → πίσω στην κάρτα «Δεν το βρήκα»', await sites.count() === 1 && await p.locator('#ctaBtn').isDisabled());
-await sites.locator('[data-a="add"]').click();
+ok('#L «Άκυρο» χωρίς τιμή → μένει γραμμή χωρίς τιμή, κουμπί κλειδωμένο', await siteLn.count() === 1 && /βάλε τιμή/.test(await siteLn.textContent()) && await p.locator('#ctaBtn').isDisabled());
+await siteLn.locator('.tier[data-t="custom"]').click();
 await siteLn.locator('[data-p="cmat"]').fill('25');
 await siteLn.locator('.custom [data-a="keep"]').click();
 ok('#L με δική του τιμή: 3 × 25 = 75,00 € και ξεκλειδώνει', await lnSum(siteLn) === 75 && await p.locator('#ctaBtn').isEnabled());
@@ -481,6 +480,64 @@ ok('#Z γραμμή με 0 (κόλλα χωρίς πλακάκια) → «Ποσ
 await p.locator('.ln:has-text("Κόλλα") [data-a="remove"]').click();
 await p.locator('.ln:has-text("Αρμόστοκος") [data-a="remove"]').click();
 ok('#Z μετά την αφαίρεση δεν μένει καμία γραμμή 0', !/Ποσότητα 0/.test(await p.textContent('#lines')));
+
+// ════ Κάθε άγνωστο υλικό = γραμμή προϊόντος χωρίς τιμή (ποτέ σιωπηλά χαμένο) ════
+const ROP = 'ανακαίνιση μπάνιου 12 μέτρα σωλήνα, μία μπανιέρα, μία μπαταρία νιπτήρα, ροπ';
+await p.goto('http://localhost:8080/');
+await dictate(p, ROP);
+ok('#U ακρόαση: τσιπάκι «1 τεμ. Ροπ ?» με το χρώμα «θέλει έλεγχο»', (await p.locator('#chips .chip.q').allTextContents()).includes('1 τεμ. Ροπ ?'), (await p.locator('#chips .chip').allTextContents()).join(' | '));
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+const rop = p.locator('.ln:has(.ln-name:text-is("Ροπ"))');
+ok('#U 4 γραμμές: σωλήνας 12 μ., μπανιέρα, μπαταρία νιπτήρα, «Ροπ» 1 τεμ.',
+  (await p.$$eval('#lines .ln-name', e => e.map(x => x.textContent))).join(' | ') === 'Σωλήνας πολυστρωματικός Φ16 | Μπανιέρα ακρυλική 170×70 | Μπαταρία νιπτήρα αναμεικτική | Ροπ' &&
+  /12 μ\./.test(await p.locator('.ln').first().locator('[data-a="qty-edit"]').textContent()) && /1 τεμ\./.test(await rop.locator('[data-a="qty-edit"]').textContent()));
+ok('#U «Ροπ»: χωρίς τιμή, «Άλλη τιμή» ανοιχτό, ένδειξη, «Άλλαξε περιγραφή», «Σβήσε», επιλογή μονάδας',
+  await rop.locator('[data-p="cmat"]').inputValue() === '' && /Δεν είναι στον κατάλογο — βάλε τιμή ή σβήσ' το/.test(await rop.textContent()) &&
+  await rop.locator('[data-a="desc-edit"]').count() === 1 && await rop.locator('[data-a="remove-line"]').count() === 1 && await rop.locator('select[data-p="unit"]').inputValue() === 'τεμ.');
+ok('#U CTA κλειδωμένο, «Ροπ» εκτός συνόλων', await p.locator('#ctaBtn').isDisabled() && /1 γραμμή/.test(await p.textContent('#ctaNote')) && /Υλικά\s*\d/.test(await p.textContent('#totals')));
+await rop.locator('[data-p="cmat"]').fill('15');
+await rop.locator('.custom [data-a="keep"]').click();
+ok('#U με τιμή 15 → ξεκλειδώνει, 15,00 €', await p.locator('#ctaBtn').isEnabled() && await lnSum(rop) === 15);
+await rop.locator('select[data-p="unit"]').selectOption('μ.');
+ok('#U αλλαγή μονάδας → «1 μ.»', /1 μ\./.test(await rop.locator('[data-a="qty-edit"]').textContent()));
+await rop.locator('select[data-p="unit"]').selectOption('τεμ.');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-pdf.on');
+await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000});
+const ropRows = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr => tr.textContent.replace(/\s+/g, ' ')));
+ok('#U το «Ροπ» βγαίνει στο PDF (1 τεμ., 15,00 €)', ropRows.some(r => /Ροπ/.test(r) && /1 τεμ\./.test(r) && /15,00/.test(r)), ropRows.join(' | '));
+// δεύτερη προσφορά: η τιμή που έγραψε για το «Ροπ» προτείνεται (δεν μπαίνει μόνη της)· «Σβήσε» → φεύγει και ξεκλειδώνει
+await p.goto('http://localhost:8080/');
+await dictate(p, ROP);
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+ok('#U δεύτερη προσφορά: το autofill δείχνει 15,00 € για το «Ροπ» (όχι αυτόματα)', /15,00/.test(await rop.locator('.hist').textContent()) && await rop.locator('[data-p="cmat"]').inputValue() === '' && await p.locator('#ctaBtn').isDisabled());
+await rop.locator('[data-a="remove-line"]').click();
+ok('#U «Σβήσε» → φεύγει (με «Αναίρεση») και ξεκλειδώνει', await rop.count() === 0 && await p.locator('#toast [data-a="undo"]').isVisible() && await p.locator('#ctaBtn').isEnabled());
+await p.locator('#toast [data-a="undo"]').click();
+ok('#U «Αναίρεση» → γυρίζει, ξανά κλειδωμένο', await rop.count() === 1 && await p.locator('#ctaBtn').isDisabled());
+// τιμή 0 μόνο ρητά → «στην εργασία»
+await rop.locator('[data-p="cmat"]').fill('0');
+await rop.locator('.custom [data-a="keep"]').click();
+ok('#U τιμή 0 γραμμένη ρητά → «στην εργασία», ξεκλειδώνει', (await rop.locator('.ln-sum').textContent()).includes('στην εργασία') && await p.locator('#ctaBtn').isEnabled());
+// «3 μέτρα ροπ»
+await p.goto('http://localhost:8080/');
+await dictate(p, '3 μέτρα ροπ');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+ok('#U «3 μέτρα ροπ» → Ροπ 3 μ.', /3 μ\./.test(await rop.locator('[data-a="qty-edit"]').textContent()) && await rop.locator('select[data-p="unit"]').inputValue() === 'μ.');
+// προσωπικά στοιχεία: μόνο λεκάνη, τίποτα στο PDF
+await p.goto('http://localhost:8080/');
+await dictate(p, 'μπάνιο για τον κύριο Παπαδόπουλο στο 6912345678 στο Χαλάνδρι, λεκάνη');
+ok('#U ακρόαση: κανένα τσιπάκι για όνομα/τηλέφωνο/περιοχή', (await p.locator('#chips .chip').allTextContents()).join('|') === '1 τεμ. Λεκάνη κρεμαστή', (await p.locator('#chips .chip').allTextContents()).join(' | '));
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+ok('#U ΜΟΝΟ λεκάνη ως προϊόν', (await p.$$eval('#lines .ln-name', e => e.map(x => x.textContent))).join('|') === 'Λεκάνη κρεμαστή');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-pdf.on');
+ok('#U στο PDF κανένα όνομα/τηλέφωνο/περιοχή (τίτλος «μπάνιο»)', !/Παπαδόπουλ|6912345678|Χαλάνδρι|κύριο/.test(await p.textContent('#pdf .pdf-head + h2, #pdf h2')) && !/Παπαδόπουλ|Χαλάνδρι/.test(await p.textContent('#pdf')) &&
+  /Προσφορά: μπάνιο/.test(await p.textContent('#pdf h2')), await p.textContent('#pdf h2'));
+await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000}).catch(() => {});
+// γεμίσματα
+await p.goto('http://localhost:8080/');
+await dictate(p, 'θέλω λεκάνη και επίσης σιφόνι');
+await p.click('#ctaBtn'); await p.waitForSelector('#s-lines.on');
+ok('#U «θέλω λεκάνη και επίσης σιφόνι» → 2 γραμμές', (await p.$$eval('#lines .ln-name', e => e.map(x => x.textContent))).join('|') === 'Λεκάνη κρεμαστή|Σιφόνι');
 
 // ── Πληκτρολόγιο: γράφω / διορθώνω το κείμενο ──
 await p.goto('http://localhost:8080/');

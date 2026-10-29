@@ -109,8 +109,9 @@ function renderChips(text){
   const box = $('chips');
   // Κρατάμε τα τσιπάκια που υπάρχουν ήδη, ώστε να «σκάνε» μόνο τα καινούρια.
   const old = new Map([...box.children].map(c => [c.textContent, c]));
-  const next = parse(text).lines.filter(l => !l.unknown && !l.suggest).map(l => {
-    const q = l.flag || l.sizeCheck;
+  // Ό,τι δεν είναι στον κατάλογο φαίνεται κι αυτό, ως «θέλει έλεγχο» (θα χρειαστεί τιμή) — ποτέ σιωπηλά χαμένο.
+  const next = parse(text).lines.filter(l => (!l.unknown || l.keep) && !l.suggest).map(l => {
+    const q = l.flag || l.sizeCheck || l.unknown;
     const label = `${fmtQty(l.qty)} ${l.unit} ${l.name}${q ? ' ?' : ''}`;
     let c = old.get(label);
     if(!c){ c = document.createElement('span'); c.className = 'chip' + (q ? ' q' : ''); c.textContent = label; }
@@ -348,13 +349,17 @@ function showFieldError(el, key, msg){
 // Κάθε γραμμή δείχνει μόνο υλικό (στρογγυλοποιημένο ανά γραμμή, όπως στα σύνολα — το PDF «βγάζει» στο λεπτό).
 // Η εργασία είναι μία τιμή για όλη τη δουλειά (LABOR) και δεν ανήκει σε γραμμή.
 const matOf = l => Math.round(l.qty * l.mat);
-const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l) && !l.sizeCheck && !l.unknown && !l.dupAsk && l.qty > 0);
+// Γραμμή εκτός καταλόγου χωρίς τιμή (needsPrice): εκκρεμότητα, δεν μπαίνει σε σύνολα/PDF.
+const needsPrice = l => l.added && l.tier !== 'custom';
+const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l) && !l.sizeCheck && !l.unknown && !l.dupAsk && !needsPrice(l) && l.qty > 0);
 // Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
 const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
+// Μονάδες για υλικό εκτός καταλόγου (ό,τι ειπώθηκε, αλλιώς τεμ.).
+const UNITS = ['τεμ.', 'μ.', 'τ.μ.', 'σακί', 'kg', 'λ.', 'κουτί', 'ζεύγος', 'κατ.'];
 // Ανοιχτό πεδίο (τιμή, ποσότητα, περιγραφή) ή άκυρη κατανάλωση = η γραμμή δεν έχει ελεγχθεί ακόμα.
 // Ποσότητα 0 δεν μπαίνει ποτέ στο PDF: κλειδώνει μέχρι να διορθωθεί ή να αφαιρεθεί η γραμμή.
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.unknown || l.dupAsk || !(l.qty > 0) || l.customOpen || l.qtyOpen || l.descOpen || l.calcBad).length; }
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.unknown || l.dupAsk || needsPrice(l) || !(l.qty > 0) || l.customOpen || l.qtyOpen || l.descOpen || l.calcBad).length; }
 
 // Αφαίρεση γραμμής με «Αναίρεση» για λίγα δευτερόλεπτα.
 let undoTimer = 0;
@@ -394,7 +399,9 @@ function buildLines(text, warning){
   $('linesNotice').hidden = !warning; $('linesNotice').textContent = warning || '';
   // Υλικά εκτός καταλόγου: φράση με ποσότητα + ουσιαστικό γίνεται κάρτα για απόφαση (ποτέ σιωπηλά χαμένο υλικό).
   // Ό,τι δεν είναι υλικό (τηλέφωνο, όνομα, ώρα, ποσό σε ευρώ, φράση χωρίς ποσότητα) δεν γίνεται κάρτα.
-  const found = r.lines.filter(l => !l.unknown || l.keep);
+  // Υλικό εκτός καταλόγου = κανονική γραμμή προϊόντος χωρίς τιμή (added): τιμή με το χέρι ή «Σβήσε».
+  const found = r.lines.filter(l => !l.unknown || l.keep).map(l => !l.unknown ? l :
+    Object.assign(l, {unknown: false, added: true, code: '', mat: 0, lab: 0, customOpen: true}));
   if(!found.length){
     notice('Δεν βρήκα κανένα υλικό. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
     return;
@@ -413,17 +420,7 @@ function renderLines(){
     const el = document.createElement('div');
     el.className = 'ln' + ((l.flag||l.suggest||needsQty(l)||l.sizeCheck)?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
-    if(l.unknown){
-      el.innerHTML = `
-        <div class="ask">Δεν το βρήκα στον κατάλογο: «${esc(l.said)}»</div>
-        <div class="sug-act"><button data-a="add">Πρόσθεσέ το</button><button data-a="drop">Αφαίρεσέ το</button></div>`;
-      // Πρόσθεσέ το: όνομα και ποσότητα από τη φράση, τιμή ΜΟΝΟ δική του (δεν υπάρχει τιμή καταλόγου).
-      el.querySelector('[data-a="add"]').onclick = () => {
-        Object.assign(l, {unknown: false, added: true, code: '', mat: 0, lab: 0, customOpen: true, focusCustom: true});
-        checkedCount++; renderLines();
-      };
-      el.querySelector('[data-a="drop"]').onclick = () => removeLine(l);
-    } else if(l.choose){
+    if(l.choose){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} — «ντους»</span></div>
         <div class="ask">${esc(l.name)}</div>
@@ -487,7 +484,8 @@ function renderLines(){
       const sc = l.sizeCheck, c = l.calc && calcParts(l, LINES);
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${esc(l.desc || l.name)}</span><span class="ln-sum num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</span></div>
-        <div class="ln-meta">${l.desc ? `${esc(l.name)} · ` : ''}${esc(l.code)} <button class="linkbtn" data-a="desc-edit">Άλλαξε περιγραφή</button></div>
+        <div class="ln-meta">${l.desc ? `${esc(l.name)} · ` : ''}${esc(l.code)} <button class="linkbtn" data-a="desc-edit">Άλλαξε περιγραφή</button>${l.added ? ` <button class="linkbtn" data-a="remove-line">Σβήσε</button>` : ''}</div>
+        ${needsPrice(l) ? `<div class="ask">Δεν είναι στον κατάλογο — βάλε τιμή ή σβήσ' το</div>` : ''}
         ${l.descOpen ? `
         <div class="prices"><label>Περιγραφή στο PDF<input data-p="desc" maxlength="120" autocomplete="off" value="${esc(l.desc || l.name)}"></label></div>
         <p class="hint">Αλλάζει μόνο το κείμενο· τιμή και κωδικός μένουν ίδια.</p>
@@ -504,6 +502,7 @@ function renderLines(){
         <div class="sug-act"><button data-a="qty-keep">Κράτα την</button><button data-a="qty-cancel">Άκυρο</button></div>` : `
         <div class="ln-row">
           <div class="qty">${l.qty <= 1 ? `<button class="rm" data-a="remove">Αφαίρεση</button>` : `<button aria-label="Λιγότερα" data-d="-1">−</button>`}<button class="qv num" data-a="qty-edit" aria-label="Γράψε ποσότητα">${fmtQty(l.qty)} ${per}</button><button aria-label="Περισσότερα" data-d="1">+</button></div>
+          ${l.added ? `<label class="unit">Μονάδα <select data-p="unit">${UNITS.map(u => `<option${u === l.unit ? ' selected' : ''}>${u}</option>`).join('')}</select></label>` : ''}
         </div>`}
         ${c ? `
         <div class="calc" data-calc>${esc(calcText(c))}</div>
@@ -545,6 +544,8 @@ function renderLines(){
       // Ποσότητα: −/+ ή γραμμένη (ίδια αυστηρή ανάγνωση με τις τιμές). Σε υλικό από υπολογισμό = δική του ποσότητα.
       // Στο ελάχιστο το − γίνεται «Αφαίρεση» (με αναίρεση) — η γραμμή δεν μένει ποτέ σιωπηλά με 0.
       el.querySelector('[data-a="remove"]')?.addEventListener('click', () => removeLine(l));
+      el.querySelector('[data-a="remove-line"]')?.addEventListener('click', () => removeLine(l));
+      el.querySelector('[data-p="unit"]')?.addEventListener('change', e => { l.unit = e.target.value; renderLines(); });
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
         if(l.calc) l.manual = true;
@@ -605,7 +606,8 @@ function renderLines(){
       });
       if(l.customOpen){
         const input = el.querySelector('[data-p="cmat"]'), histBox = el.querySelector('[data-hist]');
-        const readC = numField(el, 'cmat', {}, v => `${formatEur(v)} ανά ${l.unit}`);
+        // Εκτός καταλόγου: 0 μόνο αν το γράψει ρητά (= «στην εργασία»).
+        const readC = numField(el, 'cmat', {allowZero: !!l.added}, v => v === 0 ? '0,00 € — στην εργασία' : `${formatEur(v)} ανά ${l.unit}`);
         // Οι αποθηκευμένες τιμές φαίνονται μόνο όσο το πεδίο είναι άδειο· ποτέ δεν μπαίνουν μόνες τους.
         input.addEventListener('input', () => { l.customDraft = input.value; histBox.hidden = !!input.value || !hist.length; });
         histBox.querySelectorAll('.hi').forEach(h => h.onclick = () => {
@@ -625,8 +627,6 @@ function renderLines(){
           Object.assign(l, {customOpen: false, customDraft: ''});
           // «Βάλε 120 λ.» χωρίς δική του τιμή → πίσω στην ερώτηση (ποτέ όνομα 120 λ. με τιμή του 80 λ.).
           if(l.sizeSaid && l.tier !== 'custom'){ Object.assign(l, l.sizeSaid); l.sizeSaid = null; }
-          // «Πρόσθεσέ το» χωρίς τιμή → πίσω στην κάρτα «Δεν το βρήκα» (ποτέ υλικό χωρίς τιμή στην προσφορά).
-          if(l.added && l.tier !== 'custom') Object.assign(l, {added: false, unknown: true});
           renderLines();
         };
         if(l.focusCustom){ l.focusCustom = false; setTimeout(() => input.focus(), 0); }
