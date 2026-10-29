@@ -1,5 +1,6 @@
 // Μετατρέπει ελεύθερη ομιλία («δώδεκα μέτρα σωλήνα και μια λεκάνη…») ή σημειώσεις σε γραμμές προσφοράς.
 import { CATALOG, TITLE_WORDS } from './catalog.js';
+import { parseAmount, toCents } from './number.js';
 
 export const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ς/g, 'σ');
 // Φωνητική μορφή: ανοχή στα συνηθισμένα ορθογραφικά (σολήνας/σωλήνας, λεκανι/λεκάνη, κολα/κόλλα).
@@ -60,12 +61,14 @@ function toNumber(tok, next = ''){
 const isWordNumber = t => !/\d/.test(t) && numberWord(t) != null;
 
 /** Αριθμός που ξεκινά στο i, και σύνθετος από διαδοχικές λέξεις («είκοσι πέντε») → {n, end}· null αν δεν είναι αριθμός. */
-function numAt(tokens, i){
-  let n = toNumber(tokens[i], tokens[i + 1]), end = i;
+function numAt(tokens, i, {money = false} = {}){
+  let n = toNumber(tokens[i], money ? '' : tokens[i + 1]), end = i;
   if(n == null) return null;
-  while(isWordNumber(tokens[end]) && isWordNumber(tokens[end + 1] || '')){
+  if(isWordNumber(tokens[i]) && /^χιλιαδ/.test(tokens[i + 1] || '') && n < 1000){ n *= 1000; end++; }   // «δύο χιλιάδες»
+  while((isWordNumber(tokens[end]) || /^χιλιαδ/.test(tokens[end])) && isWordNumber(tokens[end + 1] || '')){
     const m = numberWord(tokens[end + 1]);
-    if(n % 100 === 0 && m < 100) n += m;
+    if(n % 1000 === 0 && m < 1000 && m >= 100) n += m;                       // «χίλια διακόσια»
+    else if(n % 100 === 0 && m < 100) n += m;
     else if(n >= 20 && n % 10 === 0 && m < 10) n += m;
     else break;
     end++;
@@ -78,7 +81,7 @@ function numAt(tokens, i){
 const DIM_SEP = new Set(['επι', 'x', 'χ', '×', '*']);
 // Μονάδα μεγέθους → [είδος, εμφάνιση, συντελεστής προς λίτρα/εκατοστά]. Διαβάζει και τις ετικέτες τύπων του καταλόγου.
 const SIZE_UNIT = {λιτρα:['vol','λ.',1], λιτρων:['vol','λ.',1], λ:['vol','λ.',1], εκατοστα:['len','εκ.',1], εκ:['len','εκ.',1], ποντουσ:['len','εκ.',1],
-  χιλιοστα:['len','χιλ.',0.1], χιλ:['len','χιλ.',0.1], ιντσεσ:['len','ίντσες',2.54], χερι:['coat','χέρι',1], χερια:['coat','χέρια',1],
+  χιλιοστα:['len','χιλ.',0.1], χιλ:['len','χιλ.',0.1], ιντσα:['inch','"',1], ιντσεσ:['inch','"',1], ιντσασ:['inch','"',1], χερι:['coat','χέρι',1], χερια:['coat','χέρια',1],
   εξοδων:['out','εξόδων',1], εξοδουσ:['out','εξόδων',1], εξοδοι:['out','εξόδων',1], γουρνα:['bowl','γούρνα',1], γουρνεσ:['bowl','γούρνες',1], γουρνων:['bowl','γούρνες',1]};
 const fmtNum = n => String(n).replace('.', ',');
 const dimSize = (at, a, b) => ({at, kind:'dim', v:[a, b].sort((x, y) => x - y), label:`${fmtNum(a)}×${fmtNum(b)}`});
@@ -89,6 +92,9 @@ function attributes(tokens){
   for(let i = 0; i < tokens.length; i++){
     const x = tokens[i].match(/^(\d+(?:[.,]\d+)?)[xχ×*](\d+(?:[.,]\d+)?)$/);
     if(x){ at.add(i); sizes.push(dimSize(i, ...[x[1], x[2]].map(v => parseFloat(v.replace(',', '.'))))); continue; }
+    // Ίντσες: «1/2», «3/4"», «1"» (σπείρωμα βάνας/διακόπτη).
+    const f = tokens[i].match(/^(\d)\/(\d{1,2})"?$/) ?? tokens[i].match(/^(\d+)()"$/);
+    if(f){ const v = f[2] ? +f[1] / +f[2] : +f[1]; at.add(i); sizes.push({at: i, kind: 'inch', v: [v], label: `${f[0].replace(/"$/, '')}"`}); continue; }
     const a = numAt(tokens, i);
     if(!a) continue;
     const b = DIM_SEP.has(tokens[a.end + 1]) ? numAt(tokens, a.end + 2) : null;
@@ -96,7 +102,7 @@ function attributes(tokens){
     const last = b ? b.end : u ? a.end + 1 : -1;
     if(last < 0) continue;
     for(let k = i; k <= last; k++) at.add(k);
-    sizes.push(b ? dimSize(i, a.n, b.n) : {at: i, kind: u[0], v: [Math.round(a.n * u[2] * 100) / 100], label: `${fmtNum(a.n)} ${u[1]}`});
+    sizes.push(b ? dimSize(i, a.n, b.n) : {at: i, kind: u[0], v: [Math.round(a.n * u[2] * 100) / 100], label: u[0] === 'inch' ? `${fmtNum(a.n)}"` : `${fmtNum(a.n)} ${u[1]}`});
     i = last;
   }
   return {at, sizes};
@@ -121,15 +127,18 @@ function nearest(item, said){
 
 // Keywords σε φωνητική μορφή (υπολογίζονται μία φορά).
 const PH = new Map(CATALOG.map(c => [c, {
-  kw: c.keywords.map(phon), not: (c.notWords || []).map(phon), after: (c.notAfter || []).map(phon), before: (c.notBefore || []).map(phon),
+  kw: c.keywords.map(k => phon(k).split('+')), not: (c.notWords || []).map(phon), after: (c.notAfter || []).map(phon), before: (c.notBefore || []).map(phon),
 }]));
+// Keywords δύο λέξεων («σετ ντους»): η δεύτερη λέξη ανήκει στο ίδιο υλικό και δεν πιάνει δικό της.
+const PAIRS = [...PH.values()].flatMap(p => p.kw.filter(k => k.length > 1));
 
 function findItem(tokens, i){
   const tok = phon(g(tokens[i])), prev = phon(g(tokens[i-1] || '')), next = [tokens[i+1], tokens[i+2]].filter(Boolean).map(t => phon(g(t)));
   const en = isLatin(tokens[i]) ? tokens[i] : null;
+  if(PAIRS.some(([a, b]) => prev.startsWith(a) && tok.startsWith(b))) return undefined;
   return CATALOG.find(c => {
     const p = PH.get(c);
-    const hit = (en && c.en?.includes(en)) || p.kw.some(k => tok.startsWith(k));
+    const hit = (en && c.en?.includes(en)) || p.kw.some(([a, b]) => tok.startsWith(a) && (!b || (next[0] || '').startsWith(b)));
     return hit && !p.not.some(w => tok.startsWith(w)) && !p.after.some(k => prev.startsWith(k)) &&
       !p.before.some(k => next.some(n => n.startsWith(k)));
   });
@@ -158,13 +167,15 @@ function makeLine(item, qty, tokens, qtyMissing, {dim, said} = {}){
     // Τύπος με άλλη διάσταση από αυτή που ειπώθηκε δεν μπαίνει σιωπηλά — ρωτάμε.
     const sameDim = o => o.label.startsWith(dim + ' ');
     const fits = o => !dim || !/^\d+×\d+/.test(o.label) || sameDim(o);
-    let picked = item.options.find(o => hasAny(tokens, o.kw)) ?? item.options[item.def];
+    const said0 = item.options.find(o => hasAny(tokens, o.kw));
+    let picked = said0 ?? item.options[item.def];
+    line.typeSaid = !!said0;
     if(picked && !fits(picked)) picked = undefined;
     // Μέγεθος που ειπώθηκε: μπαίνει ο τύπος με αυτό το μέγεθος, χωρίς ερώτηση. Αν δεν υπάρχει στον κατάλογο,
     // η γραμμή ρωτάει (τα δύο πιο κοντινά ή «Άλλο μέγεθος») — όχι σιωπηλά άλλο είδος.
     if(said && item.options.some(o => optSizes(o).length)){
       const hits = item.options.filter(o => optSizes(o).some(s => sameSize(s, said)));
-      if(hits.length === 1) picked = hits[0];
+      if(hits.length === 1){ picked = hits[0]; line.typeSaid = true; }
       else if(hits.length > 1) picked = undefined;
       else line.sizeCheck = {said: said.label, near: nearest(item, said)};
     }
@@ -173,6 +184,10 @@ function makeLine(item, qty, tokens, qtyMissing, {dim, said} = {}){
     line.pick = o => ({name:`${base} ${dim && sameDim(o) ? o.label.slice(dim.length + 1) : o.label}`, code:o.code, mat:o.mat, lab:o.lab ?? item.lab ?? 0, use:o.use});
     if(picked){ Object.assign(line, line.pick(picked)); }
     else line.flag = true;
+  }
+  if(item.choose){
+    // Αμφίσημη λέξη («ντους»): η γραμμή ρωτάει ποιο υλικό — και γίνεται εκείνο (lineFor).
+    Object.assign(line, {flag: true, choose: item.choose.map(id => CATALOG.find(c => c.id === id))});
   }
   if(qtyMissing && MEASURED.has(line.unit)) line.qtyMissing = true;
   return checkQty(line);
@@ -187,19 +202,49 @@ const UNIT_WORDS = [[/^(μ|μετρ|μετ|m|meters?|metres?)$|^μετρ/, 'μ.'
 const unitOf = tok => UNIT_WORDS.find(([re]) => re.test(tok))?.[1];
 const wordTok = w => norm(w).replace(/[«»"'().,;:!?]/g, '');
 
+// Λέξεις που δεν κάνουν μια φράση υλικό: άρθρα/προθέσεις, και ό,τι δείχνει ώρα, ημέρα, ποσό, τηλέφωνο, διεύθυνση,
+// πρόσωπο («στις 10 το πρωί», «σε 3 μέρες», «οδός Ερμού 25», «κύριος Παπαδόπουλος»).
+const STOP = new Set(['για','τον','την','τη','το','τα','του','τησ','των','στο','στη','στην','στον','στα','στουσ','στισ','σε','με','απο',
+  'ο','η','οι','ενα','ενασ','μια','θα','να','πιο','ακομα','ακομη','ολα','ολο','αλλο','αλλα','που','πωσ','οτι','κι']);
+const NOISE = /^(ωρα|ωρεσ|ωρων|πρωι|απογευμ|βραδ|μεσημερ|λεπτ|μερα|μερεσ|ημερ|εβδομαδ|μηνα|μηνεσ|τηλ|κινητ|οδοσ|οδο$|λεωφ|οροφ|κυρ|ευρω|eur|φπα|ποσοστ|εργασ)/;
+
 // Υλικό εκτός καταλόγου: κρατάμε ποσότητα/μονάδα και ό,τι απομένει ως περιγραφή.
+// keep: φράση με ΑΛΗΘΙΝΗ ποσότητα (όχι τηλέφωνο, ποσό €, ώρα, «2ος») και ουσιαστικό → κάρτα για απόφαση (ποτέ σιωπηλά χαμένο).
 function unknownLine(seg){
   let qty = null, unit = '';
-  const rest = seg.split(/\s+/).filter(w => {
-    const t = wordTok(w);
-    const n = toNumber(t);
+  const words = seg.split(/\s+/), toks = words.map(wordTok);
+  const rest = words.filter((w, k) => {
+    const t = toks[k];
+    const n = /^\d+(?:[.,]\d+)?$/.test(t) || isWordNumber(t) || isLatin(t) ? toNumber(t, toks[k + 1]) : null;
     if(n != null && qty == null){ qty = n; return false; }
     const u = t.length <= 12 && unitOf(t);
     if(u && !unit && qty != null){ unit = u; return false; }
     return true;
-  }).join(' ').replace(/^[\s,.:-]+|[\s,.:;-]+$/g, '');
-  return checkQty({id:'unknown', name: rest ? rest[0].toUpperCase() + rest.slice(1) : seg, unit, qty: qty ?? 1, mat:0, lab:0, unknown:true});
+  });
+  const name = rest.join(' ').replace(/^[\s,.:-]+|[\s,.:;-]+$/g, '');
+  const nouns = rest.map(wordTok).filter(t => /\p{L}{3,}/u.test(t) && !STOP.has(t) && !FILLER.has(t) && !CORR.has(t) && !NEG.has(t));
+  const keep = qty != null && nouns.length > 0 && !toks.some(t => NOISE.test(t));
+  return checkQty({id:'unknown', name: name ? name[0].toUpperCase() + name.slice(1) : seg, said: seg.replace(/[.,;:!?]+$/, ''),
+    unit: unit || (keep ? 'τεμ.' : ''), qty: qty ?? 1, mat:0, lab:0, unknown:true, keep});
 }
+
+/** Ποσό εργασίας από φράση με «εργασία»: {cents} ή {ask} όταν ο αριθμός είναι ασαφής· null αν δεν ειπώθηκε ποσό.
+ *  ΜΟΝΟ εδώ (φωνή + «ευρώ/€»): τελεία και ακριβώς 3 ψηφία = χιλιάδες («1.200 ευρώ» → 1200). Αλλού αυστηρά όπως number.js. */
+function laborAmount(tokens){
+  for(let i = 0; i < tokens.length; i++){
+    const t = tokens[i].replace(/€$/, ''), euro = /€$/.test(tokens[i]) || /^(€|ευρω|eur)/.test(tokens[i + 1] || '');
+    if(/^\d[\d.,]*$/.test(t)){
+      const r = parseAmount(euro && /^\d{1,3}(\.\d{3})+$/.test(t) ? t.replace(/\./g, '') : t);
+      return r.error ? {ask: `${t}${euro ? ' ευρώ' : ''}`} : {cents: toCents(r.value)};
+    }
+    const a = isWordNumber(tokens[i]) && numAt(tokens, i, {money: true});
+    if(a) return {cents: Math.round(a.n * 100)};
+  }
+  return null;
+}
+
+/** Γραμμή για υλικό του καταλόγου (π.χ. όταν ο χρήστης διάλεξε «Ντουζιέρα» αντί για «σετ ντους»). */
+export const lineFor = (id, qty) => makeLine(CATALOG.find(c => c.id === id), qty, []);
 
 // ── Καθάρισμα εξόδου LLM / σημειώσεων πριν την ανάλυση ──
 const HEADER_WORDS = new Set(['υλικο','υλικα','ποσοτητα','ποσοτ','μοναδα','περιγραφη','τιμη','κωδικοσ','ποσο','αα','item','items','qty','quantity','description','unit','price']);
@@ -238,11 +283,18 @@ export function calcParts(line, lines){
 export function parse(text){
   text = cleanText(text);
   const lines = [], unknown = [];
-  let title = '', correcting = false, lastLine = null, prevCorr = false;
+  let title = '', correcting = false, lastLine = null, prevCorr = false, labor = null;
   for(const rawSeg of text.split(SPLIT)){
     const seg = rawSeg.trim();
     if(!seg) continue;
-    const tokens = norm(seg).split(/[\s\-–—/]+/).map(t => t.replace(/[«»"'()]/g, '')).filter(Boolean);
+    // Η κάθετος χωρίζει λέξεις, εκτός από ίντσες («3/4»).
+    const tokens = norm(seg).split(/[\s\-–—]+/).flatMap(t => /^\d\/\d{1,2}"?$/.test(t) ? [t] : t.split('/'))
+      .map(t => t.replace(/[«»'()]/g, '').replace(/"(?!$)/g, '')).filter(Boolean);
+    // «Εργασία 1.200 ευρώ»: ποσό για την εργασία της δουλειάς — όχι γραμμή υλικού.
+    if(tokens.some(t => t.startsWith('εργασ')) && !tokens.some((_, k) => findItem(tokens, k))){
+      const a = laborAmount(tokens);
+      if(a){ labor = a; continue; }
+    }
     let pending = null, pendingAt = -1, found = 0, lastNum = -2;
     const attr = attributes(tokens);
     const used = new Set(attr.at), seen = new Set(), saidQty = new Map(), inclQty = new Set();
@@ -264,7 +316,8 @@ export function parse(text){
       if(n != null){
         // Σύνθετοι αριθμοί μόνο από διαδοχικές λέξεις: «εκατόν είκοσι πέντε» → 125 (όχι «12 5»).
         const joinable = lastNum === i - 1 && isWordNumber(tokens[i]) && isWordNumber(tokens[i - 1]) && pending != null;
-        if(joinable && pending % 100 === 0 && n < 100) pending += n;
+        if(joinable && pending % 1000 === 0 && n >= 100 && n < 1000) pending += n;     // «χίλια διακόσια» (ήταν σιωπηλά 200)
+        else if(joinable && pending % 100 === 0 && n < 100) pending += n;
         else if(joinable && pending >= 20 && pending % 10 === 0 && n < 10) pending += n;
         else { pending = n; pendingAt = i; }
         lastNum = i;
@@ -306,11 +359,13 @@ export function parse(text){
       }
       const qtyMissing = pending == null;
       saidQty.set(item, saidQty.get(item) || !qtyMissing);
+      const mention = qtyMissing ? null : pending;
       const qty = pending ?? 1;
       pending = null;
       const line = makeLine(item, qty, tokens, qtyMissing, item.sizeInName
         ? {dim: sizeFor(i, attr.sizes.filter(d => d.kind === 'dim'))?.label}
         : {said: bare ?? sizeFor(i, attr.sizes)});
+      line.mentions = [mention];
       const same = lines.find(l => l.id === line.id && (l.name === line.name || correcting) && !l.flag && !line.flag &&
         (correcting || (!l.sizeCheck && !line.sizeCheck)));
       if(same && correcting){
@@ -319,7 +374,10 @@ export function parse(text){
         correcting = false;
         lastLine = same;
       } else if(same){
-        same.qty += qty;
+        // Ίδιο υλικό ξανά: αθροίζεται, αλλά η γραμμή θα ρωτήσει (dupAsk) — όχι σιωπηλά διπλό.
+        // Ποσότητα που έλειπε (προσωρινό 1) δεν μπαίνει στο άθροισμα.
+        same.qty = same.qtyMissing && MEASURED.has(same.unit) ? qty : same.qty + qty;
+        same.mentions.push(mention);
         if(!qtyMissing) same.qtyMissing = false;
         checkQty(same);
         lastLine = same;
@@ -365,7 +423,24 @@ export function parse(text){
     line.qty = calcParts(line, lines).qty;
     lines.push(line);
   }
+  // Εξαρτήματα χωρίς διάμετρο: του σωλήνα της προσφοράς, αν είναι ένας (αλλιώς η προεπιλογή — ορατή στην κάρτα).
+  for(const l of lines){
+    const item = CATALOG.find(c => c.id === l.id);
+    if(!item?.sameAs || l.typeSaid || l.flag) continue;
+    const [from, kind] = item.sameAs;
+    const dia = [...new Set(lines.filter(x => x.id === from && x.name.includes(kind)).map(x => x.name.match(/Φ\d+/)?.[0]).filter(Boolean))];
+    const o = dia.length === 1 && item.options.find(o => o.label === dia[0]);
+    if(o) Object.assign(l, l.pick(o));
+  }
+  // Το ίδιο υλικό ειπώθηκε πάνω από μία φορά: «Το είπες δύο φορές: 1 ή 2;» (επιλογές: κάθε αναφορά και το σύνολο).
+  for(const l of lines){
+    const said = (l.mentions || []).map(m => m ?? (l.unit === 'τεμ.' ? 1 : null)).filter(m => m != null);
+    if(said.length < 2) continue;
+    const sum = Math.round(said.reduce((a, b) => a + b, 0) * 1000) / 1000;
+    l.dupAsk = {times: l.mentions.length, opts: [...new Set([...said, sum])].sort((a, b) => a - b)};
+    l.qty = sum;
+  }
   for(const u of unknown) lines.push(unknownLine(u));
 
-  return {title: title ? title[0].toLowerCase() + title.slice(1) : '', lines};
+  return {title: title ? title[0].toLowerCase() + title.slice(1) : '', lines, labor};
 }
