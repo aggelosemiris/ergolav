@@ -3,7 +3,7 @@ if(window.top !== window.self){
   document.body.innerHTML = '<p style="padding:24px;font:17px system-ui">Η εφαρμογή ανοίγει μόνο απευθείας, όχι μέσα σε άλλη σελίδα.</p>';
   throw new Error('framed');
 }
-import { parse, glueSacks } from './parse.js';
+import { parse, calcParts } from './parse.js';
 import { createMic, micSupported } from './mic.js';
 import { readNotes, shrink, getKey, setKey, forgetKey, canRememberKey, isKeyRemembered, keyProvider } from './photo.js';
 import { makePdf, shareFile, download } from './share.js';
@@ -299,7 +299,13 @@ const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l) && !
 // Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
 const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.customOpen).length; }
+// Ανοιχτό πεδίο (τιμή, ποσότητα, περιγραφή) ή άκυρη κατανάλωση = η γραμμή δεν έχει ελεγχθεί ακόμα.
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.customOpen || l.qtyOpen || l.descOpen || l.calcBad).length; }
+
+// Υλικό από υπολογισμό: «15 τ.μ. × 5 kg/τ.μ. + 10% φύρα = 4 σακιά».
+const unitTxt = (q, u) => u === 'σακί' && q !== 1 ? 'σακιά' : u;
+const calcText = c => `${fmtQty(c.src)} ${c.srcUnit} × ${fmtQty(c.rate)} ${c.unit}/${c.srcUnit} + ${fmtQty(c.waste)}% φύρα = ${fmtQty(c.qty)} ${unitTxt(c.qty, 'σακί')}`;
+const numText = v => String(v).replace('.', ',');
 
 function buildLines(text, warning){
   lastText = text;                         // για «Διόρθωσε το κείμενο» από την οθόνη ελέγχου
@@ -317,9 +323,8 @@ function buildLines(text, warning){
   renderLines();
 }
 function renderLines(){
-  // Η προτεινόμενη κόλλα ακολουθεί τα τ.μ. πλακακιού όσο δεν την έχει επιβεβαιώσει ο χρήστης.
-  const glue = LINES.find(l => l.id === 'glue' && l.suggest);
-  if(glue) glue.qty = glueSacks(LINES.filter(l => l.id === 'tile').reduce((s, l) => s + l.qty, 0));
+  // Υλικά από υπολογισμό (κόλλα, αρμόστοκος) ακολουθούν την πηγή τους, εκτός αν ο χρήστης έγραψε δική του ποσότητα.
+  for(const l of LINES) if(l.calc && !l.manual) l.qty = calcParts(l, LINES).qty;
   const box = $('lines'); box.innerHTML = '';
   LINES.forEach((l,i)=>{
     const el = document.createElement('div');
@@ -340,6 +345,7 @@ function renderLines(){
     } else if(l.suggest){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span><span class="ln-sum num">${eur(matOf(l))}</span></div>
+        ${l.calc ? `<div class="calc">${esc(calcText(calcParts(l, LINES)))}</div>` : ''}
         <div class="ask">Δεν το είπες, αλλά χρειάζεται για τα πλακάκια. Το κρατάς;</div>
         <div class="sug-act"><button data-a="keep">Ναι, πρόσθεσέ το</button><button data-a="drop">Όχι</button></div>`;
       el.querySelector('[data-a="keep"]').onclick=()=>{ l.suggest=false; checkedCount++; renderLines(); };
@@ -365,15 +371,34 @@ function renderLines(){
       const T = tiers(l.matBase), cur = l.customOpen ? 'custom' : (l.tier ?? 'normal');
       const key = priceKey(l), hist = T ? history(key) : [];
       const per = esc(l.unit);
+      const sc = l.sizeCheck, c = l.calc && calcParts(l, LINES);
       el.innerHTML = `
-        <div class="ln-top"><span class="ln-name">${esc(l.name)}</span><span class="ln-sum num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</span></div>
-        <div class="ln-meta">${esc(l.code)}</div>
-        ${l.sizeCheck ? `
-        <div class="ask">Είπες ${esc(l.sizeCheck.said)} — ο κατάλογος έχει ${esc(l.sizeCheck.cat.replace(/\.$/, ''))}. Έλεγξε την τιμή.</div>
-        <div class="sug-act"><button data-a="size-cat">Κράτα ${esc(l.sizeCheck.cat)}</button><button data-a="size-said">Βάλε ${esc(l.sizeCheck.said)}</button></div>` : ''}
+        <div class="ln-top"><span class="ln-name">${esc(l.desc || l.name)}</span><span class="ln-sum num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</span></div>
+        <div class="ln-meta">${l.desc ? `${esc(l.name)} · ` : ''}${esc(l.code)} <button class="linkbtn" data-a="desc-edit">Άλλαξε περιγραφή</button></div>
+        ${l.descOpen ? `
+        <div class="prices"><label>Περιγραφή στο PDF<input data-p="desc" maxlength="120" autocomplete="off" value="${esc(l.desc || l.name)}"></label></div>
+        <p class="hint">Αλλάζει μόνο το κείμενο· τιμή και κωδικός μένουν ίδια.</p>
+        <div class="sug-act"><button data-a="desc-keep">Κράτα την</button><button data-a="desc-cancel">Άκυρο</button></div>` : ''}
+        ${sc ? `
+        <div class="ask">Είπες ${esc(sc.said)} — ο κατάλογος έχει ${esc(sc.near.map(o => o.label).join(' ή ').replace(/\.$/, ''))}. Διάλεξε:</div>
+        <div class="sug-act">${sc.near.map(o => `<button data-near="${l.options.indexOf(o)}">${esc(o.label)}</button>`).join('')}<button data-a="size-other">Άλλο μέγεθος (${esc(sc.said)})</button></div>`
+        : l.options ? `
+        <div class="types" role="group" aria-label="Τύπος">${l.options.map((o, j) => `
+          <button class="tp${o.code === l.code ? ' on' : ''}" data-opt="${j}" aria-pressed="${o.code === l.code}">${esc(o.label)}</button>`).join('')}
+        </div>` : ''}
+        ${l.qtyOpen ? `
+        <div class="prices"><label>Ποσότητα (${per})<input inputmode="decimal" data-p="eqty" value="${numText(l.qty)}"><small class="parsed" data-o="eqty"></small></label></div>
+        <div class="sug-act"><button data-a="qty-keep">Κράτα την</button><button data-a="qty-cancel">Άκυρο</button></div>` : `
         <div class="ln-row">
-          <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><span class="num">${fmtQty(l.qty)} ${per}</span><button aria-label="Περισσότερα" data-d="1">+</button></div>
+          <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><button class="qv num" data-a="qty-edit" aria-label="Γράψε ποσότητα">${fmtQty(l.qty)} ${per}</button><button aria-label="Περισσότερα" data-d="1">+</button></div>
+        </div>`}
+        ${c ? `
+        <div class="calc" data-calc>${esc(calcText(c))}</div>
+        <div class="prices">
+          <label>${esc(c.unit)}/${esc(c.srcUnit)}<input inputmode="decimal" data-p="rate" value="${numText(c.rate)}"><small class="parsed" data-o="rate"></small></label>
+          <label>Φύρα %<input inputmode="decimal" data-p="waste" value="${numText(c.waste)}"><small class="parsed" data-o="waste"></small></label>
         </div>
+        ${l.manual ? `<p class="hint">Δική σου ποσότητα · <button class="linkbtn" data-a="calc-reset">επαναφορά στον υπολογισμό</button></p>` : ''}` : ''}
         ${T ? `
         <div class="tiers" role="group" aria-label="Τιμή υλικού ανά ${per}">
           ${(l.sizeSaid ? [] : [['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']]).map(([t, n]) => `
@@ -388,20 +413,74 @@ function renderLines(){
           </div>
           <div class="sug-act"><button data-a="keep">Κράτα την</button><button data-a="cancel">Άκυρο</button></div>
         </div>` : ''}` : ''}`;
-      if(l.sizeCheck){
-        el.querySelector('[data-a="size-cat"]').onclick = () => { l.sizeCheck = null; checkedCount++; renderLines(); };
-        // Άλλο μέγεθος = άλλο είδος: παίρνει το όνομα που ειπώθηκε, χωρίς κωδικό καταλόγου, και η τιμή γράφεται με το χέρι
-        // (οι προτάσεις τιμής του καταλόγου κρύβονται — είναι για το άλλο μέγεθος).
-        el.querySelector('[data-a="size-said"]').onclick = () => {
-          Object.assign(l, {sizeSaid: {name: l.name, code: l.code, sizeCheck: l.sizeCheck},
-            name: l.name.replace(l.sizeCheck.cat, l.sizeCheck.said), code: '', sizeCheck: null, customOpen: true, focusCustom: true});
-          checkedCount++; renderLines();
-        };
-      }
+      // Τύπος/μέγεθος: αλλάζει όνομα, κωδικό και τιμή καταλόγου (οι προτάσεις ξαναϋπολογίζονται· η δική του
+      // τιμή για αυτόν τον κωδικό φαίνεται στο «Άλλη τιμή», όχι αυτόματα). Η δική του περιγραφή σβήνει: θα έλεγε άλλο είδος.
+      const choose = o => {
+        Object.assign(l, l.pick(o), {matBase: null, tier: 'normal', customOpen: false, customDraft: '', sizeSaid: null, sizeCheck: null, desc: null});
+        checkedCount++; renderLines();
+      };
+      el.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => choose(l.options[+b.dataset.opt]));
+      el.querySelectorAll('[data-near]').forEach(b => b.onclick = () => choose(l.options[+b.dataset.near]));
+      // Άλλο μέγεθος = άλλο είδος: παίρνει το μέγεθος που ειπώθηκε, χωρίς κωδικό καταλόγου, και η τιμή γράφεται με το χέρι
+      // (οι προτάσεις τιμής του καταλόγου κρύβονται — είναι για άλλο μέγεθος).
+      if(sc) el.querySelector('[data-a="size-other"]').onclick = () => {
+        Object.assign(l, {sizeSaid: {name: l.name, code: l.code, sizeCheck: sc},
+          name: `${l.base} ${sc.said}`, code: '', sizeCheck: null, desc: null, customOpen: true, focusCustom: true});
+        checkedCount++; renderLines();
+      };
+      // Ποσότητα: −/+ ή γραμμένη (ίδια αυστηρή ανάγνωση με τις τιμές). Σε υλικό από υπολογισμό = δική του ποσότητα.
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
+        if(l.calc) l.manual = true;
         renderLines();
       });
+      if(l.qtyOpen){
+        const readQ = numField(el, 'eqty', {maxDecimals: 3}, v => `${formatQty(v)} ${l.unit}`);
+        el.querySelector('[data-a="qty-keep"]').onclick = () => {
+          const r = readQ();
+          if(r.error) return;
+          Object.assign(l, {qty: r.value, qtyOpen: false});
+          if(l.calc) l.manual = true;
+          checkedCount++; renderLines();
+        };
+        el.querySelector('[data-a="qty-cancel"]').onclick = () => { l.qtyOpen = false; renderLines(); };
+        setTimeout(() => el.querySelector('[data-p="eqty"]').focus(), 0);
+      } else el.querySelector('[data-a="qty-edit"]').onclick = () => { l.qtyOpen = true; renderLines(); };
+      // Περιγραφή: ελεύθερο κείμενο για το PDF (π.χ. μάρκα). Δεν αλλάζει τιμή ούτε κωδικό· κενό = του καταλόγου.
+      el.querySelector('[data-a="desc-edit"]').onclick = () => { l.descOpen = true; renderLines(); };
+      if(l.descOpen){
+        const input = el.querySelector('[data-p="desc"]');
+        el.querySelector('[data-a="desc-keep"]').onclick = () => {
+          const t = input.value.trim().replace(/\s+/g, ' ');
+          Object.assign(l, {desc: t && t !== l.name ? t : null, descOpen: false});
+          renderLines();
+        };
+        el.querySelector('[data-a="desc-cancel"]').onclick = () => { l.descOpen = false; renderLines(); };
+        setTimeout(() => input.focus(), 0);
+      }
+      // Κατανάλωση και φύρα: άκυρη τιμή κλειδώνει το κουμπί (ποτέ σιωπηλά λάθος ποσότητα)· έγκυρη ενημερώνει αμέσως.
+      if(c){
+        const reads = {rate: numField(el, 'rate', {}, v => `${formatQty(v)} ${c.unit}/${c.srcUnit}`),
+                       waste: numField(el, 'waste', {allowZero: true, maxDecimals: 1}, v => `${formatQty(v)}%`)};
+        const bad = {};
+        for(const k of ['rate', 'waste']) el.querySelector(`[data-p="${k}"]`).addEventListener('input', () => {
+          const r = reads[k]();
+          bad[k] = !!r.error;
+          l.calcBad = bad.rate || bad.waste;
+          if(!r.error){
+            l.calc[k] = r.value;
+            const n = calcParts(l, LINES);
+            if(!l.manual) l.qty = n.qty;
+            el.querySelector('[data-calc]').textContent = calcText(n);
+            el.querySelector('[data-a="qty-edit"]').textContent = `${fmtQty(l.qty)} ${l.unit}`;
+            el.querySelector('.ln-sum').textContent = l.mat > 0 ? eur(matOf(l)) : 'στην εργασία';
+            renderLabor(); renderTotals();
+          }
+          refreshCta();
+        });
+        const reset = el.querySelector('[data-a="calc-reset"]');
+        if(reset) reset.onclick = () => { l.manual = false; renderLines(); };
+      }
       el.querySelectorAll('.tier').forEach(b=>b.onclick=()=>{
         const t = b.dataset.t;
         if(t === 'custom'){ l.customOpen = true; l.focusCustom = true; renderLines(); return; }
@@ -514,7 +593,7 @@ function buildPdf(){
     <div class="who">Προς: ${esc(client)}</div>
     <table>
       <tr><th>Περιγραφή</th><th class="r">Υλικό</th></tr>
-      ${LINES.filter(l=>l.qty>0).map(l=>`<tr><td>${esc(l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
+      ${LINES.filter(l=>l.qty>0).map(l=>`<tr><td>${esc(l.desc || l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
     </table>
     <div class="sum num">
       <div><span>Υλικά</span><span>${eur(s.mat)}</span></div>
