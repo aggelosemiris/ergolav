@@ -194,7 +194,7 @@ function makeLine(item, qty, tokens, qtyMissing, {dim, said} = {}){
 }
 
 // Συντομογραφίες σημειώσεων («12 μ.», «τ.μ.», «τεμ.») — η τελεία τους δεν κλείνει φράση.
-const ABBR = /(^|[\s\d])(τ\.\s?μ|τμ|μ|τεμ|τεμαχ|μετ|κιλ|λιτ|σακ|κουτ|εκ|χιλ)\./gi;
+const ABBR = /(^|[\s\d])(τ\.\s?μ|τμ|μ|τεμ|τεμαχ|μετ|κιλ|λιτ|σακ|κουτ|εκ|χιλ|κ)\./gi;   // «κ. Νικολάου»: όχι τέλος φράσης
 
 // Μονάδες που μπορεί να ακολουθούν την ποσότητα (κανονικοποιημένες ρίζες → εμφάνιση).
 const UNIT_WORDS = [[/^(μ|μετρ|μετ|m|meters?|metres?)$|^μετρ/, 'μ.'], [/^(τμ|τετραγων|sqm|m2)/, 'τ.μ.'], [/^(τεμ|pcs|pieces?)/, 'τεμ.'], [/^σακ/, 'σακί'],
@@ -206,11 +206,49 @@ const wordTok = w => norm(w).replace(/[«»"'().,;:!?]/g, '');
 // πρόσωπο («στις 10 το πρωί», «σε 3 μέρες», «οδός Ερμού 25», «κύριος Νικολάου»).
 const STOP = new Set(['για','τον','την','τη','το','τα','του','τησ','των','στο','στη','στην','στον','στα','στουσ','στισ','σε','με','απο',
   'ο','η','οι','ενα','ενασ','μια','θα','να','πιο','ακομα','ακομη','ολα','ολο','αλλο','αλλα','που','πωσ','οτι','κι']);
-const NOISE = /^(ωρα|ωρεσ|ωρων|πρωι|απογευμ|βραδ|μεσημερ|λεπτ|μερα|μερεσ|ημερ|εβδομαδ|μηνα|μηνεσ|τηλ|κινητ|οδοσ|οδο$|λεωφ|οροφ|κυρ|ευρω|eur|φπα|ποσοστ|εργασ)/;
+const NOISE = /^(ωρα|ωρεσ|ωρων|πρωι|απογευμ|βραδ|μεσημερ|λεπτ|μερα|μερεσ|ημερ|εβδομαδ|μηνα|μηνεσ|τηλ|κινητ|οδοσ|οδο$|λεωφ|οροφ|κυρ|ευρω|eur|φπα|ποσοστ|εργασ|αυριο|σημερα|μεθαυριο|χθεσ|δευτερ|τριτη|τεταρτη|πεμπτ|παρασκευ|σαββατ|κυριακ|ιανουαρ|φεβρουαρ|μαρτ|απριλ|μαιου|μαιοσ|ιουν|ιουλ|αυγουστ|σεπτεμβρ|οκτωβρ|νοεμβρ|δεκεμβρ)/;
+// Λέξεις που δεν είναι μέρος του ονόματος υλικού («θέλω ροπ» → «Ροπ», «επίσης σιφόνι»).
+const ASK_WORDS = new Set(['θελω','θελουμε','θελει','βαλε','βαλτε','βαζουμε','βαλουμε','βαζω','χρειαζεται','χρειαζονται','χρειαζομαι',
+  'χρειαζομαστε','επισησ','ακομα','ακομη','λοιπον','ε','εε','εμ','παρε','παρτε','φερε','φερτε','και','μου','μασ']);
 
-// Υλικό εκτός καταλόγου: κρατάμε ποσότητα/μονάδα και ό,τι απομένει ως περιγραφή.
-// keep: φράση με ΑΛΗΘΙΝΗ ποσότητα (όχι τηλέφωνο, ποσό €, ώρα, «2ος») και ουσιαστικό → κάρτα για απόφαση (ποτέ σιωπηλά χαμένο).
-function unknownLine(seg){
+// Προσωπικά στοιχεία και τοποθεσίες βγαίνουν από τη φράση ΠΡΙΝ γίνει τίτλος ή υλικό — ποτέ στο PDF:
+// τηλέφωνα, «κύριο/κυρία/κ. Όνομα», «για τον/την Όνομα», «στο/στη Χαλάνδρι» (κεφαλαίο = κύριο όνομα).
+const PERSON = /^(κυρ(ιο|ια|ιοσ|ιου|ιασ|ιε)|κ)$/;
+const PLACE_PREP = new Set(['στο','στη','στην','στον','στα','στισ','στουσ','σε','απο','προσ']);
+const ARTICLE = new Set(['τον','την','τη','το','τουσ','τισ']);
+const isCap = w => /^\p{Lu}/u.test(w || '');
+const isPhone = w => /^\+?[\d().-]+$/.test(w) && w.replace(/\D/g, '').length >= 5;
+export function scrub(seg){
+  const w = seg.split(/\s+/).filter(Boolean), n = w.map(wordTok), drop = new Set();
+  for(let i = 0; i < w.length; i++){
+    if(isPhone(w[i])){                                                   // «6912345678», «210 1234567»
+      drop.add(i);
+      for(const k of [i - 1, i + 1]) if(/^\+?\d{2,4}$/.test(w[k] || '')) drop.add(k);
+    }
+    if(PERSON.test(n[i]) && w[i + 1]){                                   // «κύριο Παπαδόπουλο», «κ. Νικολάου Γιώργο»
+      drop.add(i); drop.add(i + 1);
+      if(isCap(w[i + 2])) drop.add(i + 2);
+    }
+  }
+  for(let i = 0; i < w.length; i++){
+    const next = i + 2 < w.length ? i + 2 : -1;
+    if(n[i] === 'για' && ARTICLE.has(n[i + 1]) && next > 0 && (drop.has(next) || isCap(w[next]))){   // «για τον (κύριο) Γιώργο»
+      drop.add(i); drop.add(i + 1);
+      for(let k = next; k < w.length && (drop.has(k) || isCap(w[k])); k++) drop.add(k);
+    }
+    if(PLACE_PREP.has(n[i]) && i + 1 < w.length && (drop.has(i + 1) || isCap(w[i + 1]))){     // «στο Χαλάνδρι», «στο 69…»
+      drop.add(i);
+      for(let k = i + 1; k < w.length && (drop.has(k) || isCap(w[k])); k++) drop.add(k);
+    }
+  }
+  return w.filter((_, i) => !drop.has(i)).join(' ');
+}
+
+// Υλικό εκτός καταλόγου: κρατάμε ποσότητα/μονάδα και ό,τι απομένει ως όνομα.
+// keep: φράση με ουσιαστικό (όχι μόνο γεμίσματα, όχι ώρα/ημερομηνία/ποσό/τηλέφωνο/πρόσωπο/τόπος) → γραμμή προϊόντος
+// χωρίς τιμή, για να τη συμπληρώσει ή να τη σβήσει ο χρήστης (ποτέ σιωπηλά χαμένο). Ποσότητα που δεν ειπώθηκε = 1.
+function unknownLine(raw){
+  const seg = scrub(raw);
   let qty = null, unit = '';
   const words = seg.split(/\s+/), toks = words.map(wordTok);
   const rest = words.filter((w, k) => {
@@ -221,9 +259,10 @@ function unknownLine(seg){
     if(u && !unit && qty != null){ unit = u; return false; }
     return true;
   });
+  while(rest.length && (ASK_WORDS.has(wordTok(rest[0])) || FILLER.has(wordTok(rest[0])) || STOP.has(wordTok(rest[0])))) rest.shift();
   const name = rest.join(' ').replace(/^[\s,.:-]+|[\s,.:;-]+$/g, '');
-  const nouns = rest.map(wordTok).filter(t => /\p{L}{3,}/u.test(t) && !STOP.has(t) && !FILLER.has(t) && !CORR.has(t) && !NEG.has(t));
-  const keep = qty != null && nouns.length > 0 && !toks.some(t => NOISE.test(t));
+  const nouns = rest.map(wordTok).filter(t => /\p{L}{2,}/u.test(t) && !STOP.has(t) && !FILLER.has(t) && !CORR.has(t) && !NEG.has(t) && !ASK_WORDS.has(t));
+  const keep = nouns.length > 0 && !toks.some(t => NOISE.test(t));
   return checkQty({id:'unknown', name: name ? name[0].toUpperCase() + name.slice(1) : seg, said: seg.replace(/[.,;:!?]+$/, ''),
     unit: unit || (keep ? 'τεμ.' : ''), qty: qty ?? 1, mat:0, lab:0, unknown:true, keep});
 }
@@ -411,8 +450,8 @@ export function parse(text){
     if(found) continue;
     if(tokens.every(t => FILLER.has(t) || CORR.has(t) || NEG.has(t))) continue;   // «όχι, συγγνώμη», «λοιπόν»
     const onlyQty = tokens.every(t => toNumber(t) != null || unitOf(t));
-    if(!title && pending == null && hasAny(tokens, TITLE_WORDS)) title = seg.replace(/[.,;:!?]+$/, '');
-    else if(!onlyQty && (tokens.length >= 2 || pending != null || tokens[0].length >= 4)) unknown.push(seg);
+    if(!title && pending == null && hasAny(tokens, TITLE_WORDS)) title = scrub(seg).replace(/[.,;:!?]+$/, '');
+    else if(!onlyQty && (tokens.length >= 2 || pending != null || tokens[0].length >= 2)) unknown.push(seg);
   }
 
   // Υλικά που βγαίνουν από υπολογισμό (κόλλα, αρμόστοκος από τα πλακάκια), αν δεν ειπώθηκαν: προτείνονται για έλεγχο.
