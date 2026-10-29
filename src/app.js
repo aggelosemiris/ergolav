@@ -3,7 +3,7 @@ if(window.top !== window.self){
   document.body.innerHTML = '<p style="padding:24px;font:17px system-ui">Η εφαρμογή ανοίγει μόνο απευθείας, όχι μέσα σε άλλη σελίδα.</p>';
   throw new Error('framed');
 }
-import { parse, calcParts } from './parse.js';
+import { parse, calcParts, lineFor } from './parse.js';
 import { createMic, micSupported } from './mic.js';
 import { readNotes, shrink, getKey, setKey, forgetKey, canRememberKey, isKeyRemembered, keyProvider } from './photo.js';
 import { makePdf, shareFile, download } from './share.js';
@@ -19,6 +19,9 @@ const BARS = 18;
 let LINES = [], TITLE = 'εργασίες';
 // Εργασία: ΜΙΑ τιμή για όλη τη δουλειά (λεπτά). null = αυτόματη πρόταση από τον κατάλογο· αριθμός = ό,τι έγραψε ο τεχνίτης.
 let LABOR = null, laborBad = false;
+// Εργασία από τη φωνή («εργασία 1.200 ευρώ»): voice = το ποσό που ακούστηκε (λεπτά) για την ένδειξη «από τη φωνή — έλεγξε»·
+// ask = ακούστηκε ποσό αλλά είναι ασαφές («1.5 ευρώ») — δεν μπαίνει, το κουμπί κλειδώνει μέχρι να γραφτεί.
+let laborVoice = null, laborAsk = null;
 const eur = c => (c/100).toLocaleString('el-GR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtQty = formatQty;   // ίδια ακρίβεια (3 δεκαδικά) με την είσοδο της ποσότητας
@@ -295,12 +298,40 @@ function showFieldError(el, key, msg){
 // Κάθε γραμμή δείχνει μόνο υλικό (στρογγυλοποιημένο ανά γραμμή, όπως στα σύνολα — το PDF «βγάζει» στο λεπτό).
 // Η εργασία είναι μία τιμή για όλη τη δουλειά (LABOR) και δεν ανήκει σε γραμμή.
 const matOf = l => Math.round(l.qty * l.mat);
-const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l) && !l.sizeCheck);
+const okLines = () => LINES.filter(l=>!l.flag && !l.suggest && !needsQty(l) && !l.sizeCheck && !l.unknown && !l.dupAsk && l.qty > 0);
 // Πρόταση εργασίας από τον κατάλογο: Σ qty × εργασία του είδους, για τις γραμμές χωρίς εκκρεμότητα.
 const autoLabor = () => okLines().reduce((s,l)=>s+Math.round(l.qty*l.lab),0);
 const needsQty = l => l.qtyMissing || l.qtyCheck;
 // Ανοιχτό πεδίο (τιμή, ποσότητα, περιγραφή) ή άκυρη κατανάλωση = η γραμμή δεν έχει ελεγχθεί ακόμα.
-function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.customOpen || l.qtyOpen || l.descOpen || l.calcBad).length; }
+// Ποσότητα 0 δεν μπαίνει ποτέ στο PDF: κλειδώνει μέχρι να διορθωθεί ή να αφαιρεθεί η γραμμή.
+function unresolved(){ return LINES.filter(l=>l.flag || l.suggest || needsQty(l) || l.sizeCheck || l.unknown || l.dupAsk || !(l.qty > 0) || l.customOpen || l.qtyOpen || l.descOpen || l.calcBad).length; }
+
+// Αφαίρεση γραμμής με «Αναίρεση» για λίγα δευτερόλεπτα.
+let undoTimer = 0;
+function removeLine(l){
+  const at = LINES.indexOf(l);
+  LINES = LINES.filter(x => x !== l); checkedCount++;
+  renderLines();
+  const t = $('toast');
+  t.innerHTML = `Αφαιρέθηκε: ${esc(l.desc || l.name)} <button class="linkbtn" data-a="undo">Αναίρεση</button>`;
+  t.hidden = false;
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => { t.hidden = true; }, 6000);
+  t.querySelector('[data-a="undo"]').onclick = () => {
+    clearTimeout(undoTimer); t.hidden = true;
+    LINES.splice(Math.min(at, LINES.length), 0, l);
+    renderLines();
+  };
+}
+// Τύπος που διάλεξε για γραμμή που ρωτούσε: αν υπάρχει ήδη γραμμή με τον ίδιο κωδικό, δεν μένουν σιωπηλά δύο —
+// ενώνονται σε μία που ρωτάει «Το είπες δύο φορές».
+function mergeSameCode(l){
+  const o = l.code && LINES.find(x => x !== l && x.code === l.code && !x.unknown);
+  if(!o) return;
+  const opts = [...new Set([o.qty, l.qty, o.qty + l.qty])].sort((a, b) => a - b);
+  Object.assign(o, {qty: o.qty + l.qty, dupAsk: {times: 2, opts}});
+  LINES = LINES.filter(x => x !== l);
+}
 
 // Υλικό από υπολογισμό: «15 τ.μ. × 5 kg/τ.μ. + 10% φύρα = 4 σακιά».
 const unitTxt = (q, u) => u === 'σακί' && q !== 1 ? 'σακιά' : u;
@@ -311,14 +342,16 @@ function buildLines(text, warning){
   lastText = text;                         // για «Διόρθωσε το κείμενο» από την οθόνη ελέγχου
   const r = parse(text);
   $('linesNotice').hidden = !warning; $('linesNotice').textContent = warning || '';
-  // Στην προετοιμασία της προσφοράς μπαίνουν ΜΟΝΟ υλικά του καταλόγου: ό,τι δεν υπάρχει εκεί (l.unknown) πετιέται εντελώς.
-  const found = r.lines.filter(l => !l.unknown);
+  // Υλικά εκτός καταλόγου: φράση με ποσότητα + ουσιαστικό γίνεται κάρτα για απόφαση (ποτέ σιωπηλά χαμένο υλικό).
+  // Ό,τι δεν είναι υλικό (τηλέφωνο, όνομα, ώρα, ποσό σε ευρώ, φράση χωρίς ποσότητα) δεν γίνεται κάρτα.
+  const found = r.lines.filter(l => !l.unknown || l.keep);
   if(!found.length){
-    notice('Δεν βρήκα κανένα υλικό από τον κατάλογο. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
+    notice('Δεν βρήκα κανένα υλικό. Πες ή γράψε π.χ. «δέκα μέτρα σωλήνα».');
     return;
   }
   LINES = found; TITLE = r.title || 'εργασίες';
-  LABOR = null; laborBad = false;          // νέα ανάλυση = νέα πρόταση εργασίας
+  // Νέα ανάλυση = νέα εργασία: ό,τι ειπώθηκε («εργασία 1.200 ευρώ»), αλλιώς η πρόταση του καταλόγου.
+  LABOR = r.labor?.cents ?? null; laborVoice = LABOR; laborAsk = r.labor?.ask ?? null; laborBad = false;
   show('s-lines','Έλεγχος');
   renderLines();
 }
@@ -330,7 +363,36 @@ function renderLines(){
     const el = document.createElement('div');
     el.className = 'ln' + ((l.flag||l.suggest||needsQty(l)||l.sizeCheck)?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
-    if(l.flag){
+    if(l.unknown){
+      el.innerHTML = `
+        <div class="ask">Δεν το βρήκα στον κατάλογο: «${esc(l.said)}»</div>
+        <div class="sug-act"><button data-a="add">Πρόσθεσέ το</button><button data-a="drop">Αφαίρεσέ το</button></div>`;
+      // Πρόσθεσέ το: όνομα και ποσότητα από τη φράση, τιμή ΜΟΝΟ δική του (δεν υπάρχει τιμή καταλόγου).
+      el.querySelector('[data-a="add"]').onclick = () => {
+        Object.assign(l, {unknown: false, added: true, code: '', mat: 0, lab: 0, customOpen: true, focusCustom: true});
+        checkedCount++; renderLines();
+      };
+      el.querySelector('[data-a="drop"]').onclick = () => removeLine(l);
+    } else if(l.choose){
+      el.innerHTML = `
+        <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} — «ντους»</span></div>
+        <div class="ask">${esc(l.name)}</div>
+        <div class="sug-act">${l.choose.map((c, j) => `<button data-c="${j}">${esc(c.name)}</button>`).join('')}</div>`;
+      el.querySelectorAll('[data-c]').forEach(b => b.onclick = () => {
+        const n = lineFor(l.choose[+b.dataset.c].id, l.qty);
+        LINES[LINES.indexOf(l)] = n;
+        mergeSameCode(n); checkedCount++; renderLines();
+      });
+    } else if(l.dupAsk){
+      const u = esc(l.unit), times = l.dupAsk.times === 2 ? 'δύο' : l.dupAsk.times;
+      el.innerHTML = `
+        <div class="ln-top"><span class="ln-name">${esc(l.name)}</span></div>
+        <div class="ask">Το είπες ${times} φορές: ${l.dupAsk.opts.map(fmtQty).join(' ή ')};</div>
+        <div class="sug-act">${l.dupAsk.opts.map((q, j) => `<button data-q="${j}">${fmtQty(q)} ${u}</button>`).join('')}</div>`;
+      el.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
+        Object.assign(l, {qty: l.dupAsk.opts[+b.dataset.q], dupAsk: null}); checkedCount++; renderLines();
+      });
+    } else if(l.flag){
       el.innerHTML = `
         <div class="ln-top"><span class="ln-name">${fmtQty(l.qty)} ${esc(l.unit)} ${esc(l.name)}</span></div>
         <div class="ask">Δεν είπες ποιο. Διάλεξε:</div>
@@ -340,6 +402,7 @@ function renderLines(){
       el.querySelectorAll('.opt').forEach(b=>b.onclick=()=>{
         Object.assign(l, l.pick(l.options[+b.dataset.j]));
         l.flag = false; checkedCount++;
+        mergeSameCode(l);
         renderLines();
       });
     } else if(l.suggest){
@@ -369,7 +432,7 @@ function renderLines(){
     } else {
       if(l.matBase == null) l.matBase = l.mat;                 // η τιμή καταλόγου μένει σταθερή, ώστε οι προτάσεις να μη μετακινούνται
       const T = tiers(l.matBase), cur = l.customOpen ? 'custom' : (l.tier ?? 'normal');
-      const key = priceKey(l), hist = T ? history(key) : [];
+      const key = priceKey(l), hist = T || l.added ? history(key) : [];
       const per = esc(l.unit);
       const sc = l.sizeCheck, c = l.calc && calcParts(l, LINES);
       el.innerHTML = `
@@ -390,7 +453,7 @@ function renderLines(){
         <div class="prices"><label>Ποσότητα (${per})<input inputmode="decimal" data-p="eqty" value="${numText(l.qty)}"><small class="parsed" data-o="eqty"></small></label></div>
         <div class="sug-act"><button data-a="qty-keep">Κράτα την</button><button data-a="qty-cancel">Άκυρο</button></div>` : `
         <div class="ln-row">
-          <div class="qty"><button aria-label="Λιγότερα" data-d="-1">−</button><button class="qv num" data-a="qty-edit" aria-label="Γράψε ποσότητα">${fmtQty(l.qty)} ${per}</button><button aria-label="Περισσότερα" data-d="1">+</button></div>
+          <div class="qty">${l.qty <= 1 ? `<button class="rm" data-a="remove">Αφαίρεση</button>` : `<button aria-label="Λιγότερα" data-d="-1">−</button>`}<button class="qv num" data-a="qty-edit" aria-label="Γράψε ποσότητα">${fmtQty(l.qty)} ${per}</button><button aria-label="Περισσότερα" data-d="1">+</button></div>
         </div>`}
         ${c ? `
         <div class="calc" data-calc>${esc(calcText(c))}</div>
@@ -399,9 +462,10 @@ function renderLines(){
           <label>Φύρα %<input inputmode="decimal" data-p="waste" value="${numText(c.waste)}"><small class="parsed" data-o="waste"></small></label>
         </div>
         ${l.manual ? `<p class="hint">Δική σου ποσότητα · <button class="linkbtn" data-a="calc-reset">επαναφορά στον υπολογισμό</button></p>` : ''}` : ''}
-        ${T ? `
+        ${l.qty > 0 ? '' : `<div class="ask">Ποσότητα 0 — δεν μπαίνει στο PDF. Γράψε ποσότητα ή αφαίρεσε τη γραμμή.</div>`}
+        ${T || l.added ? `
         <div class="tiers" role="group" aria-label="Τιμή υλικού ανά ${per}">
-          ${(l.sizeSaid ? [] : [['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']]).map(([t, n]) => `
+          ${(l.sizeSaid || l.added ? [] : [['eco', 'Οικονομική'], ['normal', 'Κανονική'], ['premium', 'Ακριβή']]).map(([t, n]) => `
           <button class="tier${cur === t ? ' on' : ''}" data-t="${t}" aria-pressed="${cur === t}"><span>${n}</span><span class="num">${eur(T[t])}<small>/${per}</small></span></button>`).join('')}
           <button class="tier${cur === 'custom' || l.tier === 'custom' ? ' on' : ''}" data-t="custom" aria-pressed="${cur === 'custom'}"><span>Άλλη τιμή</span><span class="num">${l.tier === 'custom' && !l.customOpen ? `${eur(l.mat)}<small>/${per}</small>` : '…'}</span></button>
         </div>
@@ -429,6 +493,8 @@ function renderLines(){
         checkedCount++; renderLines();
       };
       // Ποσότητα: −/+ ή γραμμένη (ίδια αυστηρή ανάγνωση με τις τιμές). Σε υλικό από υπολογισμό = δική του ποσότητα.
+      // Στο ελάχιστο το − γίνεται «Αφαίρεση» (με αναίρεση) — η γραμμή δεν μένει ποτέ σιωπηλά με 0.
+      el.querySelector('[data-a="remove"]')?.addEventListener('click', () => removeLine(l));
       el.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
         l.qty = Math.max(0, Math.round((l.qty + (+b.dataset.d))*100)/100);
         if(l.calc) l.manual = true;
@@ -509,6 +575,8 @@ function renderLines(){
           Object.assign(l, {customOpen: false, customDraft: ''});
           // «Βάλε 120 λ.» χωρίς δική του τιμή → πίσω στην ερώτηση (ποτέ όνομα 120 λ. με τιμή του 80 λ.).
           if(l.sizeSaid && l.tier !== 'custom'){ Object.assign(l, l.sizeSaid); l.sizeSaid = null; }
+          // «Πρόσθεσέ το» χωρίς τιμή → πίσω στην κάρτα «Δεν το βρήκα» (ποτέ υλικό χωρίς τιμή στην προσφορά).
+          if(l.added && l.tier !== 'custom') Object.assign(l, {added: false, unknown: true});
           renderLines();
         };
         if(l.focusCustom){ l.focusCustom = false; setTimeout(() => input.focus(), 0); }
@@ -523,7 +591,7 @@ function renderLines(){
 function refreshCta(){
   const left = unresolved();
   cta('Έλεγξα, φτιάξε την προσφορά', buildPdf, left>0 || laborBad,
-      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : laborBad ? 'Διόρθωσε την εργασία' : '');
+      left>0 ? (left===1 ? 'Μένει 1 γραμμή να ελέγξεις' : `Μένουν ${left} γραμμές να ελέγξεις`) : laborBad ? (laborAsk ? 'Γράψε το ποσό της εργασίας' : 'Διόρθωσε την εργασία') : '');
 }
 // Εργασία για όλη τη δουλειά: ΕΝΑ πεδίο, σε δικό του container (το re-render των συνόλων δεν χαλάει το focus την ώρα
 // που γράφει). Προσυμπληρωμένο με την πρόταση του καταλόγου· ό,τι γράψει ο τεχνίτης μένει (δεν αλλάζει μόνο του
@@ -534,25 +602,29 @@ const centsText = c => { const t = (c / 100).toFixed(2).replace('.', ','); retur
 // Πηγές για τους αριθμούς: docs/SOURCES.md.
 const VAT_RATES = [24, 17, 13, 9, 6, 4, 0].map(r => [r, `${r}%`]);
 let vatRate = (() => { try { const v = Number(localStorage.getItem('ergolav.vat')); return VAT_RATES.some(([r]) => r === v) && localStorage.getItem('ergolav.vat') !== null ? v : 24; } catch { return 24; } })();
-function setVat(v){ vatRate = v; try { localStorage.setItem('ergolav.vat', String(v)); } catch {} }
+// Μόνο συντελεστής της λίστας: οτιδήποτε άλλο (π.χ. 7,25 από πειραγμένο <option>) αγνοείται.
+const isVat = v => VAT_RATES.some(([r]) => r === v);
+function setVat(v){ if(!isVat(v)) return false; vatRate = v; try { localStorage.setItem('ergolav.vat', String(v)); } catch {} return true; }
 
 function renderLabor(){
   const box = $('laborBox'), auto = autoLabor();
-  laborBad = false;                                          // το πεδίο ξαναφτιάχνεται πάντα με έγκυρη τιμή
+  laborBad = !!laborAsk;                                     // ασαφές ποσό από τη φωνή: κλειδωμένο μέχρι να γραφτεί
   box.innerHTML = `
-    <div class="prices"><label>Εργασία για όλη τη δουλειά €<input inputmode="decimal" data-p="labor" value="${centsText(LABOR ?? auto)}" placeholder="0"><small class="parsed" data-o="labor"></small></label></div>
+    <div class="prices"><label>Εργασία για όλη τη δουλειά €<input inputmode="decimal" data-p="labor" value="${laborAsk ? '' : centsText(LABOR ?? auto)}" placeholder="0"><small class="parsed" data-o="labor"></small></label></div>
     <div class="hint" data-hint></div>`;
   const hint = box.querySelector('[data-hint]');
   const syncHint = () => {
-    hint.innerHTML = LABOR != null && LABOR !== auto ? `Πρόταση καταλόγου: ${eur(auto)} <button class="linkbtn" data-a="auto">Χρησιμοποίησέ την</button>` : '';
+    const voice = laborVoice != null && LABOR === laborVoice ? '<span class="voice">από τη φωνή — έλεγξε</span> · ' : '';
+    hint.innerHTML = laborAsk ? `<span class="voice">Άκουσα εργασία «${esc(laborAsk)}» — δεν είναι σαφές ποσό. Γράψε το ποσό.</span>`
+      : LABOR != null && LABOR !== auto ? `${voice}Πρόταση καταλόγου: ${eur(auto)} <button class="linkbtn" data-a="auto">Χρησιμοποίησέ την</button>` : voice;
     const b = hint.querySelector('[data-a="auto"]');
-    if(b) b.onclick = () => { LABOR = null; renderLabor(); renderTotals(); refreshCta(); };
+    if(b) b.onclick = () => { LABOR = null; laborAsk = null; renderLabor(); renderTotals(); refreshCta(); };
   };
   const read = numField(box, 'labor', {allowZero: true}, formatEur);   // αυστηρή ανάγνωση: «1.500» μπλοκάρει
   box.querySelector('[data-p="labor"]').addEventListener('input', () => {
     const r = read();
     if(r.error){ laborBad = true; refreshCta(); return; }   // η τελευταία έγκυρη τιμή μένει, το κουμπί κλειδώνει
-    laborBad = false; LABOR = toCents(r.value);
+    laborBad = false; laborAsk = null; LABOR = toCents(r.value);
     syncHint(); renderTotals(); refreshCta();
   });
   syncHint();
@@ -561,7 +633,7 @@ function renderLabor(){
 function sums(){
   const mat = okLines().reduce((s,l)=>s+matOf(l),0);
   const lab = LABOR ?? autoLabor();
-  const net = mat+lab, vat = Math.round(net * vatRate / 100);
+  const net = mat+lab, vat = Math.round(net * (isVat(vatRate) ? vatRate : 24) / 100);
   return {mat,lab,net,vat,total:net+vat};
 }
 function renderTotals(){
@@ -574,7 +646,7 @@ function renderTotals(){
     <label class="vat">Συντελεστής ΦΠΑ
       <select id="vatRate">${VAT_RATES.map(([r, t]) => `<option value="${r}"${r === vatRate ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
     <p class="privacy">Η εφαρμογή δεν ελέγχει ποιος συντελεστής ΦΠΑ ισχύει. Τον επιλέγεις εσύ, με ευθύνη δική σου ή του λογιστή σου.</p>`;
-  $('vatRate').onchange = e => { setVat(Number(e.target.value)); renderTotals(); };
+  $('vatRate').onchange = e => { setVat(Number(e.target.value)); renderTotals(); };   // άκυρο → ξαναφτιάχνεται με τον ισχύοντα
 }
 
 // ─── 4 : PDF ─────────────────────────────────────────────────
@@ -593,7 +665,7 @@ function buildPdf(){
     <div class="who">Προς: ${esc(client)}</div>
     <table>
       <tr><th>Περιγραφή</th><th class="r">Υλικό</th></tr>
-      ${LINES.filter(l=>l.qty>0).map(l=>`<tr><td>${esc(l.desc || l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
+      ${okLines().map(l=>`<tr><td>${esc(l.desc || l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
     </table>
     <div class="sum num">
       <div><span>Υλικά</span><span>${eur(s.mat)}</span></div>

@@ -152,6 +152,10 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 .qty .qv{width:auto;min-width:64px;padding:0 6px;font-size:15px;font-weight:700;text-decoration:underline dotted;text-underline-offset:3px}
 .calc{margin-top:10px;font-size:14px;color:var(--ink)}
 .ln .hint{font-size:13px;color:var(--dim);margin-top:6px}
+.qty .rm{width:auto;padding:0 10px;font-size:14px;color:var(--warn)}
+.toast{display:flex;justify-content:center;align-items:center;gap:6px;font-size:14px;margin-bottom:8px;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:4px 10px}
+.toast[hidden]{display:none}
+.labor .voice{color:var(--warn);font-weight:600}
 .hist{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .hist[hidden]{display:none}
 .hi{display:flex;justify-content:space-between;gap:10px;align-items:baseline;text-align:left;padding:10px 12px;border-radius:10px;border:1px dashed var(--line);background:var(--paper);font-size:13px;color:var(--dim);min-height:44px}
@@ -306,6 +310,7 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 
   <div class="cta" id="cta" hidden>
     <button class="primary" id="ctaBtn"></button>
+    <div class="toast" id="toast" role="status" hidden></div>
     <small id="ctaNote" hidden></small>
   </div>
 
