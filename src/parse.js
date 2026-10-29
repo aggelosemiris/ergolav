@@ -29,7 +29,8 @@ const FRAC = {μισο:0.5,μιση:0.5,μισα:0.5,μιαμιση:1.5};
 const EN_NUM = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,fifteen:15,twenty:20,thirty:30,fifty:50,hundred:100};
 
 // Σπάει σε φράσεις: στίξη (όχι μέσα σε δεκαδικούς) και συνδετικά που η ομιλία συχνά βγάζει χωρίς στίξη.
-const SPLIT = /[.,;!?·](?=\s|$)|\n|\s(?:και|επισησ|επειτα|μετα|ακομα|ακομη|συν|and|also)\s/;
+// Με τόνους και κεφαλαία («επίσης», «ΚΑΙ»): πριν, μόνο τα άτονα πεζά χώριζαν — «επίσης»/«μετά» με τόνο δεν χώριζαν ποτέ.
+const SPLIT = /[.,;!?·](?=\s|$)|\n|\s(?:και|επίσης|επισης|έπειτα|επειτα|μετά|μετα|ακόμα|ακομα|ακόμη|ακομη|συν|and|also)\s/iu;
 
 // Άρνηση πριν από υλικό («δεν χρειάζεται θερμοσίφωνας», «εκτός από την μπανιέρα»).
 const NEG = new Set(['δεν','χωρισ','εκτοσ','οχι','μην','μη','without','no']);
@@ -62,6 +63,7 @@ const isWordNumber = t => !/\d/.test(t) && numberWord(t) != null;
 
 /** Αριθμός που ξεκινά στο i, και σύνθετος από διαδοχικές λέξεις («είκοσι πέντε») → {n, end}· null αν δεν είναι αριθμός. */
 function numAt(tokens, i, {money = false} = {}){
+  if(tokens[i] == null) return null;                                         // «30 επί» στο τέλος (ήταν εξαίρεση)
   let n = toNumber(tokens[i], money ? '' : tokens[i + 1]), end = i;
   if(n == null) return null;
   if(isWordNumber(tokens[i]) && /^χιλιαδ/.test(tokens[i + 1] || '') && n < 1000){ n *= 1000; end++; }   // «δύο χιλιάδες»
@@ -90,7 +92,7 @@ const dimSize = (at, a, b) => ({at, kind:'dim', v:[a, b].sort((x, y) => x - y), 
 function attributes(tokens){
   const at = new Set(), sizes = [];
   for(let i = 0; i < tokens.length; i++){
-    const x = tokens[i].match(/^(\d+(?:[.,]\d+)?)[xχ×*](\d+(?:[.,]\d+)?)$/);
+    const x = tokens[i].match(/^(\d+(?:[.,]\d+)?)(?:[xχ×*]|επι)(\d+(?:[.,]\d+)?)$/);   // και «30επί60» (ήταν 30 τ.μ.)
     if(x){ at.add(i); sizes.push(dimSize(i, ...[x[1], x[2]].map(v => parseFloat(v.replace(',', '.'))))); continue; }
     // Ίντσες: «1/2», «3/4"», «1"» (σπείρωμα βάνας/διακόπτη).
     const f = tokens[i].match(/^(\d)\/(\d{1,2})"?$/) ?? tokens[i].match(/^(\d+)()"$/);
@@ -99,10 +101,12 @@ function attributes(tokens){
     if(!a) continue;
     const b = DIM_SEP.has(tokens[a.end + 1]) ? numAt(tokens, a.end + 2) : null;
     const u = SIZE_UNIT[(tokens[a.end + 1] || '').replace(/\.$/, '')];
-    const last = b ? b.end : u ? a.end + 1 : -1;
+    // «30 επί» χωρίς δεύτερο αριθμό: ημιτελής διάσταση — ούτε διάσταση ούτε ποσότητα (θα ζητηθεί).
+    const half = !b && DIM_SEP.has(tokens[a.end + 1]);
+    const last = b ? b.end : u ? a.end + 1 : half ? a.end + 1 : -1;
     if(last < 0) continue;
     for(let k = i; k <= last; k++) at.add(k);
-    sizes.push(b ? dimSize(i, a.n, b.n) : {at: i, kind: u[0], v: [Math.round(a.n * u[2] * 100) / 100], label: u[0] === 'inch' ? `${fmtNum(a.n)}"` : `${fmtNum(a.n)} ${u[1]}`});
+    if(!half) sizes.push(b ? dimSize(i, a.n, b.n) : {at: i, kind: u[0], v: [Math.round(a.n * u[2] * 100) / 100], label: u[0] === 'inch' ? `${fmtNum(a.n)}"` : `${fmtNum(a.n)} ${u[1]}`});
     i = last;
   }
   return {at, sizes};
@@ -392,8 +396,9 @@ export function parse(text){
       if(pending == null){
         for(let j = i + 1; j < tokens.length && !findItem(tokens, j); j++){
           if(used.has(j)) continue;
-          const m = toNumber(tokens[j], tokens[j + 1]);
-          if(m != null){ pending = m; used.add(j); break; }
+          // Και σύνθετος αριθμός από λέξεις («αρμόστοκος είκοσι εννέα σακιά» = 29· ήταν σιωπηλά 20).
+          const a = numAt(tokens, j);
+          if(a){ pending = a.n; for(let k = j; k <= a.end; k++) used.add(k); break; }
         }
       }
       const qtyMissing = pending == null;

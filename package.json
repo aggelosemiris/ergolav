@@ -8,6 +8,7 @@
     "test:stress": "node tests/stress/run.mjs",
     "test:stress:scale": "node tests/stress/scale80k.mjs",
     "test:stress:live": "node tests/stress/run-live.mjs",
-    "test:stress:live:dry": "node tests/stress/run-live.mjs --dry"
+    "test:stress:live:dry": "node tests/stress/run-live.mjs --dry",
+    "test:release": "node tests/stress/release.mjs --n 10000"
   }
 }

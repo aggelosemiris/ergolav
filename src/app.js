@@ -31,6 +31,8 @@ let started = 0, checkedCount = 0, lastText = '';
 
 function show(id, step){
   document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on', s.id===id));
+  // Η «Αναίρεση» αφορά μόνο την οθόνη ελέγχου: σε άλλη οθόνη (π.χ. PDF που ήδη φτιάχτηκε) δεν μένει.
+  if(id !== 's-lines') $('toast').hidden = true;
   $('step').textContent = step;
   window.scrollTo({top:0});
 }
@@ -110,7 +112,9 @@ function renderChips(text){
   // Κρατάμε τα τσιπάκια που υπάρχουν ήδη, ώστε να «σκάνε» μόνο τα καινούρια.
   const old = new Map([...box.children].map(c => [c.textContent, c]));
   // Ό,τι δεν είναι στον κατάλογο φαίνεται κι αυτό, ως «θέλει έλεγχο» (θα χρειαστεί τιμή) — ποτέ σιωπηλά χαμένο.
-  const next = parse(text).lines.filter(l => (!l.unknown || l.keep) && !l.suggest).map(l => {
+  let parsed;
+  try { parsed = parse(text); } catch { return; }          // τα τσιπάκια είναι βοήθεια· το σφάλμα φαίνεται στο «Βγάλε τιμές»
+  const next = parsed.lines.filter(l => (!l.unknown || l.keep) && !l.suggest).map(l => {
     const q = l.flag || l.sizeCheck || l.unknown;
     const label = `${fmtQty(l.qty)} ${l.unit} ${l.name}${q ? ' ?' : ''}`;
     let c = old.get(label);
@@ -395,7 +399,13 @@ const numText = v => String(v).replace('.', ',');
 
 function buildLines(text, warning){
   lastText = text;                         // για «Διόρθωσε το κείμενο» από την οθόνη ελέγχου
-  const r = parse(text);
+  let r;
+  try { r = parse(text); }
+  catch {
+    // Ποτέ σιωπηλό πάγωμα: το κείμενο μένει, ο χρήστης ξέρει τι να κάνει.
+    notice('Κάτι πήγε στραβά με την ανάλυση αυτού του κειμένου. Άλλαξε λίγο τη φράση (π.χ. γράψε «30 επί 60») και πάτα ξανά «Βγάλε τιμές».');
+    return;
+  }
   $('linesNotice').hidden = !warning; $('linesNotice').textContent = warning || '';
   // Υλικά εκτός καταλόγου: φράση με ποσότητα + ουσιαστικό γίνεται κάρτα για απόφαση (ποτέ σιωπηλά χαμένο υλικό).
   // Ό,τι δεν είναι υλικό (τηλέφωνο, όνομα, ώρα, ποσό σε ευρώ, φράση χωρίς ποσότητα) δεν γίνεται κάρτα.
@@ -414,11 +424,15 @@ function buildLines(text, warning){
 }
 function renderLines(){
   // Υλικά από υπολογισμό (κόλλα, αρμόστοκος) ακολουθούν την πηγή τους, εκτός αν ο χρήστης έγραψε δική του ποσότητα.
+  // Πρόταση που υπήρχε μόνο λόγω της πηγής της (κόλλα για πλακάκια): αν η πηγή σβήστηκε, φεύγει κι αυτή.
+  // Αν την είχε κρατήσει ο χρήστης, μένει (με «Ποσότητα 0» θα κλειδώσει, για να την αφαιρέσει ο ίδιος).
+  LINES = LINES.filter(l => !(l.suggest && l.calc && !LINES.some(x => x.id === l.calc.from)));
   for(const l of LINES) if(l.calc && !l.manual) l.qty = calcParts(l, LINES).qty;
   const box = $('lines'); box.innerHTML = '';
   LINES.forEach((l,i)=>{
     const el = document.createElement('div');
-    el.className = 'ln' + ((l.flag||l.suggest||needsQty(l)||l.sizeCheck)?' flag':'');
+    // Κάθε γραμμή που περιμένει απόφαση φαίνεται («θέλει έλεγχο»): ό,τι κλειδώνει το κουμπί, χρωματίζεται.
+    el.className = 'ln' + ((l.flag||l.suggest||needsQty(l)||l.sizeCheck||l.dupAsk||l.choose||needsPrice(l)||!(l.qty > 0))?' flag':'');
     el.style.animationDelay = (i*0.07)+'s';
     if(l.choose){
       el.innerHTML = `

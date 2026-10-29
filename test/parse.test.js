@@ -534,3 +534,28 @@ test('scrub: βγάζει τηλέφωνα, πρόσωπα, τόπους· αφ�
   assert.equal(scrub('τηλ 210 1234567'), 'τηλ');
   assert.equal(scrub('3 ροπ'), '3 ροπ');
 });
+
+// ── Stress (tests/stress/release.mjs): ευρήματα που διορθώθηκαν ──
+test('«πλακάκι 30 επί» (ημιτελής διάσταση) δεν ρίχνει εξαίρεση και ζητάει ποσότητα', () => {
+  for(const t of ['πλακάκι 30 επί', 'πλακάκι 30 x', '12 μέτρα σωλήνα και πλακάκι 30 επί', '30 επί', 'επί', 'x']){
+    assert.doesNotThrow(() => parse(t), t);
+  }
+  assert.deepEqual([byId(parse('πλακάκι 30 επί'), 'tile')[0].qtyMissing, byId(parse('πλακάκι 30 επί'), 'tile')[0].qty], [true, 1]);
+});
+
+test('σύνθετος αριθμός σε λέξεις ΜΕΤΑ το υλικό: όλος (ήταν μόνο η πρώτη λέξη)', () => {
+  assert.equal(byId(parse('αρμόστοκος είκοσι εννέα σακιά'), 'grout')[0].qty, 29);
+  assert.equal(byId(parse('καλώδιο εκατόν πενήντα δύο μέτρα'), 'cable')[0].qty, 152);
+  assert.equal(byId(parse('σοβάς είκοσι οκτώ τετραγωνικά'), 'plaster')[0].qty, 28);
+});
+
+test('«επίσης», «μετά», «ακόμα» με τόνους και «ΚΑΙ» με κεφαλαία χωρίζουν φράσεις', () => {
+  assert.deepEqual(parse('ΔΥΟ ΛΕΚΑΝΕΣ ΚΑΙ ΕΡΓΑΣΙΑ 400 ΕΥΡΩ').labor, {cents: 40000});
+  assert.deepEqual(parse('2 λεκάνες επίσης εργασία 400 ευρώ').labor, {cents: 40000});
+  assert.deepEqual(parse('2 λεκάνες μετά 3 πρίζες').lines.map(l => [l.id, l.qty]), [['wc', 2], ['socket', 3]]);
+});
+
+test('«30επί60» κολλητά = διάσταση, όχι 30 τ.μ.', () => {
+  const t = byId(parse('πλακάκι 80επί60, 145 τετραγωνικά'), 'tile')[0];
+  assert.deepEqual([t.name, t.qty], ['Πλακάκι 80×60', 145]);
+});
