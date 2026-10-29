@@ -9,6 +9,7 @@ import { readNotes, shrink, getKey, setKey, forgetKey, canRememberKey, isKeyReme
 import { makePdf, shareFile, download } from './share.js';
 import { parseAmount, toCents, formatEur, formatQty } from './number.js';
 import { tiers, priceKey, history, remember, ageLabel, isStale } from './prices.js';
+import { loadProfile, saveProfile, initials, takeQuoteNo } from './profile.js';
 
 // Πιλοτικό: δεν στέλνουμε φωτογραφίες σε τρίτους. Με true ξανανοίγει η ροή φωτογραφίας (κουμπί, κάλυψη, key).
 const PHOTO_ENABLED = false;
@@ -40,6 +41,51 @@ function cta(label, fn, disabled, note){
   const n = $('ctaNote'); n.hidden = !note; n.textContent = note||'';
 }
 function notice(msg){ $('notice').hidden = !msg; $('notice').textContent = msg || ''; }
+
+// ─── 0 : στοιχεία επιχείρησης — μία φορά, μετά από την κεφαλίδα ─────
+// Αριθμός προσφοράς: δίνεται στο πρώτο PDF αυτής της προσφοράς (νέο PDF της ίδιας προσφοράς κρατά τον ίδιο).
+let PROFILE = loadProfile(), quoteNo = null, profileBack = null;
+function renderBrand(){
+  $('brandLogo').textContent = PROFILE ? initials(PROFILE.name) : '';
+  $('brandLogo').hidden = !PROFILE;
+  $('brandName').textContent = PROFILE?.name || 'ergolav';
+  $('brandTrade').textContent = PROFILE?.trade || '';
+}
+// back: τι γίνεται μετά την αποθήκευση (null = αρχική οθόνη).
+function openProfile(back){
+  profileBack = back;
+  const p = PROFILE || {};
+  $('pfName').value = p.name || ''; $('pfTrade').value = p.trade || ''; $('pfPhone').value = p.phone || ''; $('pfAfm').value = p.afm || '';
+  $('pfError').hidden = true;
+  show('s-profile', 'Τα στοιχεία σου');
+  cta(null);
+}
+$('pfSave').onclick = () => {
+  const r = saveProfile({name: $('pfName').value, trade: $('pfTrade').value, phone: $('pfPhone').value, afm: $('pfAfm').value});
+  if(r.error){
+    $('pfError').hidden = false; $('pfError').textContent = r.error;
+    $({name: 'pfName', phone: 'pfPhone', afm: 'pfAfm'}[r.field]).focus();
+    return;
+  }
+  PROFILE = r.profile; renderBrand();
+  const back = profileBack; profileBack = null;
+  if(back) back();
+  else { show('s-start', 'Νέα προσφορά'); cta(null); }
+  // Η συσκευή δεν τα κράτησε (π.χ. ιδιωτική περιήγηση): ισχύουν τώρα, θα ζητηθούν ξανά — το λέμε, δεν το κρύβουμε.
+  if(!r.saved) $('micNote').textContent = 'Τα στοιχεία σου δεν αποθηκεύτηκαν σε αυτή τη συσκευή — ισχύουν μόνο μέχρι να κλείσει η σελίδα.';
+};
+// Πάτημα στην κεφαλίδα → ίδια φόρμα· μετά επιστροφή εκεί που ήταν (το PDF ξαναφτιάχνεται με τα νέα στοιχεία).
+$('brand').onclick = () => {
+  const cur = document.querySelector('.screen.on')?.id;
+  if(cur === 's-profile' || mic.listening) return;
+  const step = $('step').textContent, c = {hidden: $('cta').hidden, label: $('ctaBtn').textContent, fn: $('ctaBtn').onclick,
+    disabled: $('ctaBtn').disabled, note: $('ctaNote').hidden ? '' : $('ctaNote').textContent};
+  openProfile(() => {
+    if(cur === 's-pdf') return buildPdf();
+    show(cur, step);
+    if(c.hidden) cta(null); else cta(c.label, c.fn, c.disabled, c.note);
+  });
+};
 
 // ─── 2 : ακρόαση σε πραγματικό χρόνο ────────────────────────
 const wave = $('wave'), transcript = $('transcript');
@@ -141,6 +187,10 @@ $('mic').onclick = () => startListening();
 $('resume').onclick = () => startListening(transcript.textContent.trim());
 $('sample').onclick = () => { transcript.textContent = SAMPLE; transcript.oninput(); };
 if(!micSupported) $('micNote').textContent = 'Ο browser σου δεν έχει αναγνώριση φωνής — θα μπορείς να το γράψεις.';
+
+// Πρώτη φορά (δεν υπάρχουν αποθηκευμένα στοιχεία): «Τα στοιχεία σου» πριν από το μικρόφωνο. Μετά, ποτέ ξανά.
+renderBrand();
+if(!PROFILE) openProfile(null);
 
 // ─── Φωτογραφία σημειώσεων → κατευθείαν στην προσφορά ──────
 const shot = $('shot');
@@ -651,18 +701,22 @@ function renderTotals(){
 
 // ─── 4 : PDF ─────────────────────────────────────────────────
 function buildPdf(){
+  // Χωρίς στοιχεία επιχείρησης δεν βγαίνει PDF: πρώτα η φόρμα, μετά το PDF.
+  if(!PROFILE) return openProfile(buildPdf);
+  if(quoteNo == null) quoteNo = takeQuoteNo();
   show('s-pdf','Προεπισκόπηση');
   const s = sums();
-  const client = $('client').value || 'Πελάτης';
+  const client = $('client').value.trim();
   const today = new Date().toLocaleDateString('el-GR');
+  const contact = [PROFILE.phone && `Τηλ. ${PROFILE.phone}`, PROFILE.afm && `ΑΦΜ ${PROFILE.afm}`].filter(Boolean).join(' · ');
   $('pdf').innerHTML = `
     <div class="pdf-head">
-      <div style="display:flex;gap:10px;align-items:center"><div class="logo">ΚΑ</div>
-        <div><b>Κατασκευές Αντωνίου</b><div style="color:#5E646B;font-size:12px">Υδραυλικά · Ανακαινίσεις</div></div></div>
-      <div style="text-align:right;color:#5E646B;font-size:12px">Αρ. 0142<br>${today}</div>
+      <div style="display:flex;gap:10px;align-items:center"><div class="logo">${esc(initials(PROFILE.name))}</div>
+        <div><b>${esc(PROFILE.name)}</b>${PROFILE.trade ? `<div style="color:#5E646B;font-size:12px">${esc(PROFILE.trade)}</div>` : ''}${contact ? `<div style="color:#5E646B;font-size:12px">${esc(contact)}</div>` : ''}</div></div>
+      <div style="text-align:right;color:#5E646B;font-size:12px">Αρ. <span class="qno">${quoteNo}</span><br>${today}</div>
     </div>
     <h2>Προσφορά: ${esc(TITLE)}</h2>
-    <div class="who">Προς: ${esc(client)}</div>
+    <div class="who">Προς: ${client ? esc(client) : '—'}</div>
     <table>
       <tr><th>Περιγραφή</th><th class="r">Υλικό</th></tr>
       ${okLines().map(l=>`<tr><td>${esc(l.desc || l.name)}<div class="q">${fmtQty(l.qty)} ${esc(l.unit)}</div></td><td class="num">${l.mat > 0 ? eur(matOf(l)) : 'στην εργασία'}</td></tr>`).join('')}
@@ -688,14 +742,14 @@ const GR = {α:'a',β:'v',γ:'g',δ:'d',ε:'e',ζ:'z',η:'i',θ:'th',ι:'i',κ:'
 const greeklish = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/ου/g, 'ou').replace(/Ου/g, 'Ou').replace(/ΟΥ/g, 'OU')
   .replace(/./g, c => { const l = c.toLowerCase(), t = GR[l]; return t ? (c === l ? t : t[0].toUpperCase() + t.slice(1)) : c; });
-const clientName = () => ($('client').value || 'Πελάτης').split(',')[0].trim();
+const clientName = () => $('client').value.split(',')[0].trim() || 'Πελάτης';
 const shareText = () =>
   `Καλησπέρα σας, σας στέλνω την προσφορά για ${TITLE}. Σύνολο ${eur(sums().total)} με ΦΠΑ.`;
 
 async function preparePdf(){
   pdfFile = null;
   cta('Ετοιμάζω το PDF…', null, true);
-  const name = `Prosfora-0142-${greeklish(clientName())}`.replace(/[^\w.-]+/g, '-').replace(/-+$/, '') + '.pdf';
+  const name = `Prosfora-${quoteNo}-${greeklish(clientName())}`.replace(/[^\w.-]+/g, '-').replace(/-+$/, '') + '.pdf';
   try {
     pdfFile = await makePdf($('pdf'), name);
     cta('Στείλε στον πελάτη', sendPdf);
@@ -705,7 +759,7 @@ async function preparePdf(){
 }
 
 async function sendPdf(){
-  const res = await shareFile(pdfFile, {title: `Προσφορά 0142 — ${clientName()}`, text: shareText()});
+  const res = await shareFile(pdfFile, {title: `Προσφορά ${quoteNo} — ${clientName()}`, text: shareText()});
   if(res === 'shared') done('Στάλθηκε', `Η προσφορά έφυγε για ${clientName()}.`);
   else if(res === 'unsupported') openSheet();
   // 'cancelled': ο χρήστης έκλεισε το μενού — μένουμε στην προεπισκόπηση

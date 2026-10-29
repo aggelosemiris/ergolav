@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Κώδικας μόνο από τον ίδιο server· δίκτυο μόνο προς Google Gemini / Anthropic. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; form-action 'none'">
-<title>Προσφορά επί τόπου — demo</title>
+<title>ergolav — προσφορά επί τόπου</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Commissioner:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -37,7 +37,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--pen);outline-of
 .num{font-variant-numeric:tabular-nums}
 
 header{padding:18px 20px 10px;display:flex;justify-content:space-between;align-items:center}
-.brand{display:flex;gap:10px;align-items:center}
+.brand{display:flex;gap:10px;align-items:center;background:none;border:0;padding:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px}
 .logo{width:38px;height:38px;border-radius:10px;background:var(--ink);color:var(--paper);
   display:grid;place-items:center;font-weight:800;font-size:15px;letter-spacing:.5px}
 .brand b{font-size:16px;font-weight:700;display:block;line-height:1.2}
@@ -156,6 +156,8 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 .toast{display:flex;justify-content:center;align-items:center;gap:6px;font-size:14px;margin-bottom:8px;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:4px 10px}
 .toast[hidden]{display:none}
 .labor .voice{color:var(--warn);font-weight:600}
+#pfSave{margin-top:22px}
+.field label small{font-size:12px}
 .hist{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .hist[hidden]{display:none}
 .hi{display:flex;justify-content:space-between;gap:10px;align-items:baseline;text-align:left;padding:10px 12px;border-radius:10px;border:1px dashed var(--line);background:var(--paper);font-size:13px;color:var(--dim);min-height:44px}
@@ -213,21 +215,37 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
 <body>
 <div id="app">
   <header>
-    <div class="brand">
-      <div class="logo">ΚΑ</div>
-      <div><b>Κατασκευές Αντωνίου</b><span>Υδραυλικά · Ανακαινίσεις</span></div>
-    </div>
+    <button class="brand" id="brand" type="button" aria-label="Τα στοιχεία σου">
+      <div class="logo" id="brandLogo"></div>
+      <div><b id="brandName">ergolav</b><span id="brandTrade"></span></div>
+    </button>
     <div class="step" id="step">Νέα προσφορά</div>
   </header>
 
   <main>
+    <!-- 0 ΣΤΟΙΧΕΙΑ: την πρώτη φορά, και από την κεφαλίδα για αλλαγές -->
+    <section class="screen" id="s-profile">
+      <h1>Τα στοιχεία σου</h1>
+      <p class="lede">Μπαίνουν μία φορά και γράφονται σε κάθε προσφορά. Μένουν μόνο σε αυτή τη συσκευή.</p>
+      <div class="field"><label for="pfName">Όνομα επιχείρησης ή ονοματεπώνυμο</label>
+        <input id="pfName" autocomplete="organization" maxlength="80" required></div>
+      <div class="field"><label for="pfTrade">Ειδικότητα <small>(προαιρετικό)</small></label>
+        <input id="pfTrade" autocomplete="off" maxlength="80" placeholder="π.χ. Υδραυλικός"></div>
+      <div class="field"><label for="pfPhone">Τηλέφωνο <small>(προαιρετικό)</small></label>
+        <input id="pfPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30"></div>
+      <div class="field"><label for="pfAfm">ΑΦΜ <small>(προαιρετικό)</small></label>
+        <input id="pfAfm" inputmode="numeric" autocomplete="off" maxlength="20"></div>
+      <div class="notice" id="pfError" role="alert" hidden></div>
+      <button class="primary" id="pfSave" type="button">Αποθήκευση</button>
+    </section>
+
     <!-- 1 START -->
     <section class="screen on" id="s-start">
       <h1>Πες τι χρειάζεται η δουλειά</h1>
       <p class="lede">Όπως θα το έλεγες στον βοηθό σου. Τα υπόλοιπα τα βγάζω εγώ.</p>
       <div class="field">
         <label for="client">Πελάτης</label>
-        <input id="client" value="Γιώργος Παπαδόπουλος, Χαλάνδρι" autocomplete="off">
+        <input id="client" value="" placeholder="Όνομα πελάτη, περιοχή" autocomplete="off">
       </div>
       <div class="mic-wrap">
         <button class="mic" id="mic" aria-label="Ξεκίνα να μιλάς">
@@ -314,7 +332,7 @@ h1{font-size:30px;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:
     <small id="ctaNote" hidden></small>
   </div>
 
-  <p class="disclaimer">Ενδεικτικές τιμές και φανταστικά στοιχεία. Η φωνή μετατρέπεται σε κείμενο από την υπηρεσία του browser σου. <span style="white-space:nowrap">Έκδοση: <span id="build">dev</span></span></p>
+  <p class="disclaimer">Ενδεικτικές τιμές. Έλεγξέ τες πριν στείλεις. Η φωνή μετατρέπεται σε κείμενο από την υπηρεσία του browser σου. <span style="white-space:nowrap">Έκδοση: <span id="build">dev</span></span></p>
 </div>
 
 <div class="sheet-veil" id="veil"></div>

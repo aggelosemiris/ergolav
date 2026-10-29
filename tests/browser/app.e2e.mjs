@@ -38,6 +38,24 @@ const ok = (name, cond, detail='') => { results.push({name, pass: !!cond}); cons
 await p.goto('http://localhost:8080/');
 await p.evaluate(() => localStorage.clear()); await p.reload();
 
+// ── Στοιχεία επιχείρησης: μία φορά, πριν από το μικρόφωνο ──
+ok('#P πρώτο άνοιγμα: «Τα στοιχεία σου» πριν από το μικρόφωνο', await p.isVisible('#s-profile.on') && !(await p.isVisible('#mic')) && await p.textContent('#step') === 'Τα στοιχεία σου');
+await p.click('#pfSave');
+ok('#P άδειο όνομα δεν αποθηκεύεται (μήνυμα, μένει η φόρμα)', await p.isVisible('#s-profile.on') && /όνομα/.test(await p.textContent('#pfError')) &&
+  await p.evaluate(() => localStorage.getItem('ergolav.profile')) === null);
+await p.fill('#pfName', 'Νίκος Παπαδάκης'); await p.fill('#pfTrade', 'Υδραυλικός'); await p.fill('#pfPhone', '6912345678'); await p.fill('#pfAfm', '12345');
+await p.click('#pfSave');
+ok('#P ΑΦΜ που δεν έχει 9 ψηφία δεν αποθηκεύεται', await p.isVisible('#s-profile.on') && /ΑΦΜ/.test(await p.textContent('#pfError')));
+await p.fill('#pfAfm', '123456789');
+await p.click('#pfSave');
+ok('#P μετά την αποθήκευση: αρχική οθόνη, κεφαλίδα με το όνομα, ειδικότητα, αρχικά «ΝΠ»', await p.isVisible('#s-start.on') && await p.textContent('#brandName') === 'Νίκος Παπαδάκης' &&
+  await p.textContent('#brandTrade') === 'Υδραυλικός' && await p.textContent('#brandLogo') === 'ΝΠ');
+await p.reload();
+ok('#P μετά από reload ΔΕΝ ξαναδείχνει φόρμα· η κεφαλίδα κρατά το όνομα', await p.isVisible('#s-start.on') && !(await p.isVisible('#s-profile.on')) && await p.textContent('#brandName') === 'Νίκος Παπαδάκης');
+ok('#P πεδίο «Πελάτης» άδειο, με placeholder', await p.inputValue('#client') === '' && await p.getAttribute('#client', 'placeholder') === 'Όνομα πελάτη, περιοχή');
+ok('#P τίτλος και κάτω κείμενο', await p.title() === 'ergolav — προσφορά επί τόπου' && /Ενδεικτικές τιμές\. Έλεγξέ τες πριν στείλεις\./.test(await p.textContent('.disclaimer')) && !/φανταστικά/.test(await p.textContent('body')));
+const PROFILE_SEED = JSON.stringify({name: 'Νίκος Παπαδάκης', trade: 'Υδραυλικός', phone: '6912345678', afm: '123456789'});
+
 // Φωτογραφία: κλειστή στο πιλοτικό (PHOTO_ENABLED = false στο src/app.js). Οι έλεγχοί της τρέχουν όταν ξανανοίξει.
 const PHOTO_ON = await p.isVisible('#photo');
 if(PHOTO_ON){
@@ -75,7 +93,7 @@ if(PHOTO_ON){
   ok('πιλοτικό: αρχείο στο κρυφό input δεν ανοίγει την οθόνη κάλυψης', await p.isVisible('#s-start.on') && !(await p.isVisible('#s-redact.on')));
   await p.evaluate(() => localStorage.setItem('ergolav.apiKey', 'AIza' + 'B'.repeat(35))); await p.reload();
   ok('πιλοτικό: με αποθηκευμένο key δεν φαίνεται ο σύνδεσμος «Κλειδί ανάγνωσης»', !(await p.isVisible('#keySettings')));
-  await p.evaluate(() => localStorage.clear()); await p.reload();
+  await p.evaluate(seed => { localStorage.clear(); localStorage.setItem('ergolav.profile', seed); }, PROFILE_SEED); await p.reload();
   // Οι υπόλοιποι έλεγχοι (τιμές, εργασία, ΦΠΑ, PDF) με το ίδιο κείμενο, γραμμένο αντί για φωτογραφημένο.
   await dictate(p, NOTES);
   await p.click('#ctaBtn');
@@ -179,6 +197,14 @@ ok('#4 ΦΠΑ 17%', /ΦΠΑ 17%/.test(t17), t17.match(/ΦΠΑ 17%[^Σ]*/)?.[0]);
 await p.click('#ctaBtn');
 await p.waitForSelector('#s-pdf.on');
 ok('#4 ΦΠΑ 17% και στο PDF', /ΦΠΑ 17%/.test(await p.textContent('#pdf')));
+// Όσο φτιάχνεται το PDF, το html2pdf κρατά προσωρινό αντίγραφο του #pdf στη σελίδα: διαβάζουμε αφού τελειώσει.
+await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000});
+const pdfHead = async () => (await p.textContent('#pdf .pdf-head')).replace(/\s+/g, ' ');
+ok('#P PDF: τα δικά του στοιχεία (όνομα, ειδικότητα, τηλέφωνο, ΑΦΜ, αρχικά)', /ΝΠ\s*Νίκος Παπαδάκης\s*Υδραυλικός\s*Τηλ\. 6912345678 · ΑΦΜ 123456789/.test(await pdfHead()), await pdfHead());
+ok('#P PDF: κανένα σταθερό στοιχείο («Αντωνίου», «0142», «ΚΑ»)', !/Αντωνίου|0142|Κατασκευές|\bΚΑ\b/.test(await p.textContent('#pdf')));
+const qno = async (pg = p) => (await pg.textContent('#pdf .qno')).trim();
+ok('#P PDF: πρώτη προσφορά της συσκευής = Αρ. 1', await qno() === '1', await qno());
+ok('#P PDF: άδειος πελάτης → «Προς: —»', (await p.textContent('#pdf .who')).trim() === 'Προς: —');
 // PDF: υλικά ανά γραμμή, η εργασία ΜΙΑ φορά στα σύνολα.
 const eurN = t => Number(t.replace(/[^\d,]/g, '').replace(',', '.'));
 const rows = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr => [...tr.children].map(td => td.textContent)));
@@ -231,6 +257,15 @@ ok('#B η πρόταση περιέχει την εργασία της αποξ�
 await p.click('#ctaBtn');
 await p.waitForSelector('#s-pdf.on');
 const rows2 = await p.$$eval('#pdf table tr:not(:has(th))', trs => trs.map(tr => [...tr.children].map(td => td.textContent)));
+ok('#P δεύτερη προσφορά = Αρ. 2', await qno() === '2', await qno());
+// αλλαγή από την κεφαλίδα: ίδια φόρμα, συμπληρωμένη· μετά πίσω στο PDF, με τα νέα στοιχεία και τον ΙΔΙΟ αριθμό
+await p.click('#brand');
+ok('#P πάτημα στην κεφαλίδα → ίδια φόρμα, με τα στοιχεία του', await p.isVisible('#s-profile.on') && await p.inputValue('#pfName') === 'Νίκος Παπαδάκης' && await p.inputValue('#pfAfm') === '123456789');
+await p.fill('#pfTrade', 'Υδραυλικός · Θερμοϋδραυλικά');
+await p.click('#pfSave');
+await p.waitForSelector('#s-pdf.on');
+ok('#P μετά την αλλαγή: πίσω στο PDF με τη νέα ειδικότητα, ίδιος αριθμός (Αρ. 2)', /Θερμοϋδραυλικά/.test(await pdfHead()) && await qno() === '2' && await p.textContent('#brandTrade') === 'Υδραυλικός · Θερμοϋδραυλικά', await pdfHead());
+await p.waitForFunction(() => document.getElementById('ctaBtn').textContent === 'Στείλε στον πελάτη', null, {timeout: 30000}).catch(() => {});
 ok('#B PDF: γραμμή μόνο εργασίας γράφει «στην εργασία»', rows2.some(r => /Αποξήλωση/.test(r[0]) && r[1].trim() === 'στην εργασία'), JSON.stringify(rows2));
 // νέα ανάλυση: η εργασία ξαναρχίζει από την πρόταση
 await p.goto('http://localhost:8080/');
@@ -485,6 +520,22 @@ ok('#K ό,τι είχε ακουστεί μένει και προστίθετα�
 await p2.click('#ctaBtn'); await p2.waitForSelector('#s-lines.on');
 ok('#K και τα δύο υλικά μπήκαν', await p2.locator('.ln:has-text("Πρίζα")').count() === 1 && await p2.locator('.ln:has-text("σποτ")').count() === 1);
 await p2.close();
+
+// ── Χαλασμένο localStorage: η εφαρμογή ανοίγει, δείχνει τη φόρμα, ο αριθμός ξεκινά από 1 ──
+const p3 = await ctx.newPage();
+const errs3 = [];
+p3.on('pageerror', e => errs3.push(e.message));
+await p3.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+await p3.goto('http://localhost:8080/');
+await p3.evaluate(() => { localStorage.setItem('ergolav.profile', '{χαλασμένο'); localStorage.setItem('ergolav.quoteNo', 'abc'); });
+await p3.reload();
+ok('#P χαλασμένο localStorage: καμία εξαίρεση, ανοίγει η φόρμα', errs3.length === 0 && await p3.isVisible('#s-profile.on'), errs3.join(' | '));
+await p3.fill('#pfName', 'Δοκιμή'); await p3.click('#pfSave');
+await dictate(p3, 'τρεις πρίζες');
+await p3.click('#ctaBtn'); await p3.waitForSelector('#s-lines.on');
+await p3.click('#ctaBtn'); await p3.waitForSelector('#s-pdf.on');
+ok('#P χαλασμένος αριθμός → ξεκινά από Αρ. 1, χωρίς ΑΦΜ/τηλέφωνο αν δεν δόθηκαν', await qno(p3) === '1' && !/ΑΦΜ|Τηλ\./.test(await p3.textContent('#pdf .pdf-head')) && errs3.length === 0);
+await p3.close();
 
 ok('#5 κανένα αίτημα σε API τρίτου όσο η φωτογραφία είναι κλειστή', PHOTO_ON || (gemBody === null && claudeBody === null));
 ok('#5 κανένα script/αίτημα σε τρίτο domain εκτός API', external.every(h => /generativelanguage|api\.anthropic|fonts\.g/.test(h)), [...new Set(external)].join(', '));
